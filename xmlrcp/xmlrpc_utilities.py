@@ -2,13 +2,29 @@ import xml.etree.ElementTree as ET
 from xmlrpc.client import dumps
 
 
-# funcion que retorna un xml rpc el resultado de una operacion.
+# funcion para validar XMLRPC response.
+def get_xml_rpc_response_validate(data):
+    return True
+
+
+# funcion para validar XMLRPC request.
+def get_xml_rpc_request_validate(data):
+    return True
+
+
+# funcion que retorna un XMLRPC el resultado de una operacion.
+def get_xml_rpc_request(params, method):
+    ret = "<methodCall>" + dumps(params, methodname=method) + "</methodCall>"
+    return ET.tostring(ret, encoding="utf-8", xml_declaration=True)
+
+
+# funcion que retorna un XMLRPC con el resultado de una operacion.
 def get_xml_rpc_response(result):
     ret = "<methodResponse>" + dumps((result,)) + "</methodResponse>"
-    return ET.tostring(ret, encoding="utf-8", xml_declaration=True),
+    return ET.tostring(ret, encoding="utf-8", xml_declaration=True)
 
 
-# funcion que retorna un xml rpc erroneo con el codigo y mensaje
+# funcion que retorna un XMLRPC erroneo con el codigo y mensaje
 # de error correspondiente.
 def get_xml_rpc_error(code):
     ret = ET.Element("methodResponse")

@@ -1,21 +1,17 @@
 import re
 
-
 LF_CHAR = chr(10)
 CR_CHAR = chr(13)
 SP_CHAR = chr(32)
 CR_NUM = 13
 LF_NUM = 10
 SP_NUM = 32
-HEAD_SEPARATOR_NUM = ord(":")
-
-
-http_methods = [
+CL_NUM = ord(":")
+HTTP_METHODS = [
     "GET", "POST", "PUT", "DELETE", "HEAD",
     "PATCH", "OPTIONS", "CONNECT", "TRACE"
 ]
-
-headers = [
+HEADERS = [
     "Accept", "Accept-Charset", "Accept-Encoding",
     "Accept-Language", "Authorization", "Expect", "From",
     "Host", "If-Match", "If-Modified-Since", "If-None-Match",
@@ -23,8 +19,7 @@ headers = [
     "Range", "Referer", "TE", "User-Agent", "Content-Length", "Connection",
     "Date", "Host", "User-Agent", "Content-Type"
 ]
-
-necessary_headers = ["Content-Type", "Host", "User-Agent", "Content-Length"]
+NECESSARY_HEADERS = ["Content-Type", "Host", "User-Agent", "Content-Length"]
 
 
 class HTTPException(Exception):
@@ -45,10 +40,10 @@ def read_chars_until(data, pos, char):
 
 def read_header(data, pos):
     # Leyendo nombre del header
-    ret = read_chars_until(data, pos, HEAD_SEPARATOR_NUM)
+    ret = read_chars_until(data, pos, CL_NUM)
     header = ret[0]
     pos = ret[1]
-    if header not in headers:
+    if header not in HEADERS:
         raise HTTPException(400)
     pos = ret[1]
     if data[pos] != SP_NUM:
@@ -75,7 +70,7 @@ def unwrap_http(data):
     # Lectura y validacion de metodo utilizado.
     ret = read_chars_until(data, pos, SP_NUM)
     method = ret[0]
-    if method not in http_methods:
+    if method not in HTTP_METHODS:
         raise HTTPException(400)
     elif method != "POST":
         raise HTTPException(501)
@@ -111,7 +106,7 @@ def unwrap_http(data):
     ret = "".join([chr(x) for x in data[pos:]])
 
     # Comprobacion del headers necesarios.
-    for header in necessary_headers:
+    for header in NECESSARY_HEADERS:
         if header not in headers_info:
             raise HTTPException(400)
 
@@ -157,6 +152,23 @@ def wrap_http_response(data, code, server_name):
     ret += "Content-Length: " + str(len(data)) + finish_line
     ret += "Content-Type: text/xml" + finish_line
     ret += "Last-Modified: text/xml" + finish_line
+    ret += finish_line
+    ret = ret.encode()
+    ret += data
+    return ret
+
+
+# funcion que crea un HTTP reques para el mensaje XML RPC.
+def wrap_http_request(data, code, host, client_name):
+    finish_line = CR_CHAR + LF_CHAR
+
+    ret = "POST / HTTP/1.1" + finish_line
+    ret += "Host: Servidor.com" + finish_line
+    ret += "Connection: close" + finish_line
+    ret += "User-Agent: " + client_name + finish_line
+    ret += "Accept-Language: es" + finish_line
+    ret += "Content-Type: text/xml" + finish_line
+    ret += "Content-Length: " + str(len(data)) + finish_line
     ret += finish_line
     ret = ret.encode()
     ret += data
