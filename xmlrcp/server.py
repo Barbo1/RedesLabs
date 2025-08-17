@@ -1,8 +1,8 @@
 from socket import socket, SHUT_RDWR, AF_INET, SOCK_STREAM, timeout
 from xmlrpc.client import loads
 from threading import Thread
-from .http_utilities import unwrap_http, wrap_http_response, HTTPException
-from .xmlrpc_utilities import get_xml_rpc_error, get_xml_rpc_response
+from .http_utilities import unwrap_http_request, wrap_http_response, HTTPException
+from .xmlrpc_utilities import write_xmlrpc_error, write_xmlrpc_response
 
 
 class Server(object):
@@ -29,10 +29,10 @@ class Server(object):
     def handler(self, conn):
 
         # recepción y procesamiento de datos.
-        http_req = ""
+        http_req = b""
         try:
             while True:
-                res = conn.recv(self.buffer_receptor).decode()
+                res = conn.recv(self.buffer_receptor)
                 if not res:
                     break
                 http_req += res
@@ -46,18 +46,17 @@ class Server(object):
         # Descompresion de HTTP.
         code = 200
         try:
-            data = unwrap_http(http_req)
+            data = unwrap_http_request(http_req)
         except HTTPException as ex:
-            data = ""
+            data = "".encode()
             code = ex.value
         else:
 
             # Descompresion de XML_RPC.
             try:
-                print(data)
                 xml_rpc = loads(data)
             except Exception:
-                data = get_xml_rpc_error(1)
+                data = write_xmlrpc_error(1)
             else:
                 method = xml_rpc[1]
                 params = xml_rpc[0]
@@ -66,17 +65,17 @@ class Server(object):
                 try:
                     method = getattr(self, method)
                 except AttributeError:
-                    data = get_xml_rpc_error(2)
+                    data = write_xmlrpc_error(2)
                 else:
 
                     # validar que se puede obtener el resultado.
                     try:
                         data = method(*params)
-                        data = get_xml_rpc_response(data)
+                        data = write_xmlrpc_response(data)
                     except TypeError:
-                        data = get_xml_rpc_error(3)
+                        data = write_xmlrpc_error(3)
                     except Exception:
-                        data = get_xml_rpc_error(4)
+                        data = write_xmlrpc_error(4)
 
         # Wrapping data en un http response.
         data = wrap_http_response(data, code, self.SERVER_NAME)

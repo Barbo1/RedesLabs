@@ -1,6 +1,6 @@
 from socket import socket, AF_INET, SOCK_STREAM, timeout
-from xmlrpc.client import loads
-from .xmlrpc_utilities import get_xml_rpc_request
+from .xmlrpc_utilities import write_xmlrpc_request, read_xmlrpc_response
+from .http_utilities import wrap_http_request, unwrap_http_response
 
 
 class ClientException(Exception):
@@ -11,8 +11,8 @@ class ClientException(Exception):
 
 
 class Client(object):
-    # Socket mediante el cual acepta conexiones.
-    jsonrpc_version = "2.0"
+    # User agent del cliente.
+    user_agent = "Agente"
 
     # Largo del buffer que acepta un mensaje.
     buffer_receptor = 128
@@ -51,12 +51,12 @@ class Client(object):
             sock.connect((self.address, self.port))
 
             # Envio de datos.
+            sock.settimeout(self.SIMPLE_OP)
+            data = write_xmlrpc_request(tuple(args), method)
+            data = wrap_http_request(data, self.user_agent)
+            size = 0
+            msglen = len(data)
             try:
-                sock.settimeout(self.SIMPLE_OP)
-                data = get_xml_rpc_request(tuple(args), method)
-                data = data.encode()
-                size = 0
-                msglen = len(data)
                 while size < msglen:
                     size += sock.send(data[size:])
             except timeout:
@@ -66,17 +66,15 @@ class Client(object):
                 sock.close()
                 return
 
-            print("CLIENT | REQUEST: " + data)
-
             # recepcion de datos.
-            data = ""
+            data = b""
             try:
                 sock.settimeout(self.COMPLEX_OP)
                 while True:
                     res = sock.recv(self.buffer_receptor)
                     if not res:
                         break
-                    data += res.decode()
+                    data += res
             except timeout:
                 pass
             except Exception:
@@ -87,16 +85,25 @@ class Client(object):
             # cierre de socket cliente.
             sock.close()
 
-            print("CLIENT | RESPONSE: " + data)
-
             # retorno de información.
-            if not data:
-                raise ClientException(code=0, message="El mensaje esta vacio.")
-
             try:
-                data = loads(data)
-            except Exeception:
-                raise ClientException(code=0, message="El mensaje esta vacio.")
+                data = unwrap_http_response(data)
+                data = read_xmlrpc_response(data)
+            except Exception:
+                raise ClientException(
+                    code=0,
+                    message="La respuesta no es un XMLRPC response."
+                )
+
+            if data["type"]:
+                raise ClientException(
+                    code=data["faultCode"],
+                    message=data["faultString"]
+                )
+            else:
+                data = data["data"][0]
+
+            return data
 
         return ret
 
