@@ -55,12 +55,9 @@ def read_header(data, pos, headers):
     ret = read_chars_until(data, pos, CL_NUM)
     header = ret[0]
     pos = ret[1]
-    if header not in headers:
+    if header not in headers or data[ret[1]] != SP_NUM:
         raise HTTPException(400)
-    pos = ret[1]
-    if data[pos] != SP_NUM:
-        raise HTTPException(400)
-    pos += 1
+    pos = ret[1] + 1
 
     # Leyendo valor del header
     ret = read_chars_until(data, pos, CR_NUM)
@@ -208,14 +205,9 @@ def wrap_http_response(data, code, server_name):
     elif code == 501:
         phrase = "Not Implemented"
 
-    print()
-    print(data)
-    print(len(data))
-    print()
-
-
     ret = "HTTP/1.1 " + str(code) + " " + phrase + FINISH_LINE
     ret += "Server: " + server_name + FINISH_LINE
+    ret += "Connection: close" + FINISH_LINE
     ret += "Content-Length: " + str(len(data)) + FINISH_LINE
     ret += "Content-Type: text/xml" + FINISH_LINE
     ret += "Date: " + current_time() + FINISH_LINE

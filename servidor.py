@@ -5,7 +5,7 @@ def suma(a, b):
     return a + b
 
 
-servidor = Server(("localhost", 8086))
+servidor = Server(("localhost", 8093))
 servidor.add_method(suma)
 
 try:

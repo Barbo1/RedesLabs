@@ -1,8 +1,9 @@
-from socket import socket, SHUT_RDWR, AF_INET, SOCK_STREAM, timeout
+import socket
 from xmlrpc.client import loads
 from threading import Thread
-from .http_utilities import unwrap_http_request, wrap_http_response, HTTPException
-from .xmlrpc_utilities import write_xmlrpc_error, write_xmlrpc_response
+from . import http_utilities
+from . import xmlrpc_utilities
+from . import socket_functions
 
 
 class Server(object):
@@ -13,7 +14,7 @@ class Server(object):
     queue_length = 5
 
     # Largo del buffer que acepta un mensaje.
-    buffer_receptor = 128
+    buffer_size = 1024
 
     # Tiempo en milisegundos que espera antes de retornar timeout.
     SIMPLE_OP = 0.575
@@ -22,32 +23,25 @@ class Server(object):
     SERVER_NAME = "PythonPrueba/1.1.1"
 
     def __init__(self, info):
-        self.sock = socket(AF_INET, SOCK_STREAM)
+        self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.sock.bind(info)
         self.sock.listen(self.queue_length)
 
     def handler(self, conn):
+        conn.settimeout(self.SIMPLE_OP)
 
         # recepción y procesamiento de datos.
-        http_req = b""
-        try:
-            while True:
-                res = conn.recv(self.buffer_receptor)
-                if not res:
-                    break
-                http_req += res
-        except timeout:
-            pass
-        except Exception:
-            print("ha ocurrido un error.")
+        readed = socket_functions.read_socket(conn, self.buffer_size)
+        if not readed["status"]:
             conn.close()
             return
+        http_req = readed["data"]
 
         # Descompresion de HTTP.
         code = 200
         try:
-            data = unwrap_http_request(http_req)
-        except HTTPException as ex:
+            data = http_utilities.unwrap_http_request(http_req)
+        except http_utilities.HTTPException as ex:
             data = "".encode()
             code = ex.value
         else:
@@ -56,7 +50,7 @@ class Server(object):
             try:
                 xml_rpc = loads(data)
             except Exception:
-                data = write_xmlrpc_error(1)
+                data = xmlrpc_utilities.write_xmlrpc_error(1)
             else:
                 method = xml_rpc[1]
                 params = xml_rpc[0]
@@ -65,33 +59,21 @@ class Server(object):
                 try:
                     method = getattr(self, method)
                 except AttributeError:
-                    data = write_xmlrpc_error(2)
+                    data = xmlrpc_utilities.write_xmlrpc_error(2)
                 else:
 
                     # validar que se puede obtener el resultado.
                     try:
                         data = method(*params)
-                        data = write_xmlrpc_response(data)
+                        data = xmlrpc_utilities.write_xmlrpc_response(data)
                     except TypeError:
-                        data = write_xmlrpc_error(3)
+                        data = xmlrpc_utilities.write_xmlrpc_error(3)
                     except Exception:
-                        data = write_xmlrpc_error(4)
-
-        # Wrapping data en un http response.
-        data = wrap_http_response(data, code, self.SERVER_NAME)
+                        data = xmlrpc_utilities.write_xmlrpc_error(4)
 
         # Envio de data.
-        try:
-            size = 0
-            msglen = len(data)
-            while size < msglen:
-                size += conn.send(data[size:])
-        except timeout:
-            pass
-        except Exception:
-            print("ha ocurrido un error.")
-            conn.close()
-            return
+        data = http_utilities.wrap_http_response(data, code, self.SERVER_NAME)
+        socket_functions.send_socket(conn, data)
 
         conn.close()
 
@@ -99,7 +81,6 @@ class Server(object):
         while True:
             try:
                 conn, _ = self.sock.accept()
-                conn.settimeout(self.SIMPLE_OP)
                 th = Thread(target=self.handler, args=(conn, ))
                 th.start()
             except KeyboardInterrupt:
@@ -109,4 +90,4 @@ class Server(object):
         setattr(self, function.__name__, function)
 
     def shutdown(self):
-        self.sock.shutdown(SHUT_RDWR)
+        self.sock.shutdown(socket.SHUT_RDWR)

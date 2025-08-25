@@ -1,12 +1,15 @@
-from socket import socket, AF_INET, SOCK_STREAM, timeout
-from .xmlrpc_utilities import write_xmlrpc_request, read_xmlrpc_response
-from .http_utilities import wrap_http_request, unwrap_http_response
+import socket
+from . import http_utilities
+from . import xmlrpc_utilities
+from . import socket_functions
+
+FORMAT_ERROR = "La respuesta no es un XMLRPC response."
 
 
 class ClientException(Exception):
-    def __init__(self, message, code):
-        self.message = message
+    def __init__(self, code, message):
         self.code = code
+        self.message = message
         super().__init__("")
 
 
@@ -15,7 +18,7 @@ class Client(object):
     user_agent = "Agente"
 
     # Largo del buffer que acepta un mensaje.
-    buffer_receptor = 128
+    buffer_size = 1024
 
     # IP mediante la cual se realiza la conexión.
     address = None
@@ -47,59 +50,38 @@ class Client(object):
                 raise TypeError("Puerto no encontrada.")
 
             # Creación del socket cliente.
-            sock = socket(AF_INET, SOCK_STREAM)
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             sock.connect((self.address, self.port))
+            sock.settimeout(self.SIMPLE_OP)
 
             # Envio de datos.
-            sock.settimeout(self.SIMPLE_OP)
-            data = write_xmlrpc_request(tuple(args), method)
-            data = wrap_http_request(data, self.user_agent)
-            size = 0
-            msglen = len(data)
-            try:
-                while size < msglen:
-                    size += sock.send(data[size:])
-            except timeout:
-                pass
-            except Exception:
-                print("ha ocurrido un error.")
+            data = xmlrpc_utilities.write_xmlrpc_request(tuple(args), method)
+            data = http_utilities.wrap_http_request(data, self.user_agent)
+            sended = socket_functions.send_socket(sock, data)
+            if not sended["status"]:
                 sock.close()
                 return
 
             # recepcion de datos.
-            data = b""
-            try:
-                sock.settimeout(self.COMPLEX_OP)
-                while True:
-                    res = sock.recv(self.buffer_receptor)
-                    if not res:
-                        break
-                    data += res
-            except timeout:
-                pass
-            except Exception:
-                print("Ha ocurrido un error.")
+            sock.settimeout(self.COMPLEX_OP)
+            readed = socket_functions.read_socket(sock, self.buffer_size)
+            if not readed["status"]:
                 sock.close()
                 return
+            data = readed["data"]
 
             # cierre de socket cliente.
             sock.close()
 
             # retorno de información.
             try:
-                data = unwrap_http_response(data)
-                data = read_xmlrpc_response(data)
+                data = http_utilities.unwrap_http_response(data)
+                data = xmlrpc_utilities.read_xmlrpc_response(data)
             except Exception:
-                raise ClientException(
-                    code=0,
-                    message="La respuesta no es un XMLRPC response."
-                )
+                raise ClientException(0, FORMAT_ERROR)
 
             if data["type"]:
-                raise ClientException(
-                    code=data["faultCode"],
-                    message=data["faultString"]
-                )
+                raise ClientException(data["faultCode"], data["faultString"])
             else:
                 data = data["data"][0]
 
