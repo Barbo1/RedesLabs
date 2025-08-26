@@ -7,9 +7,6 @@ from . import socket_functions
 
 
 class Server(object):
-    # Socket mediante el cual acepta conexiones.
-    sock = None
-
     # Numero de mensajes que pueden haber en la cola de entrada.
     queue_length = 5
 
@@ -23,9 +20,14 @@ class Server(object):
     SERVER_NAME = "PythonPrueba/1.1.1"
 
     def __init__(self, info):
+
+        # Creacion del server socket.
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.sock.bind(info)
         self.sock.listen(self.queue_length)
+
+        # Lista de threads que estan vivos.
+        self.threads_alive = []
 
     def handler(self, conn):
         conn.settimeout(self.SIMPLE_OP)
@@ -80,14 +82,25 @@ class Server(object):
     def serve(self):
         while True:
             try:
+                # Sirviendo peticiones...
                 conn, _ = self.sock.accept()
                 th = Thread(target=self.handler, args=(conn, ))
+                self.threads_alive.append(th)
                 th.start()
+
+                # Filtrando hilos...
+                self.threads_alive = [
+                    th for th in self.threads_alive if th.is_alive()
+                ]
             except KeyboardInterrupt:
+                # Esperando finalizacion de hilos.
+                for th in self.threads_alive:
+                    th.join()
                 return
 
     def add_method(self, function):
         setattr(self, function.__name__, function)
 
     def shutdown(self):
-        self.sock.shutdown(socket.SHUT_RDWR)
+        self.sock.shutdown(socket.SHUT_RD)
+        self.sock.close()

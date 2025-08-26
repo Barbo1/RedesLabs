@@ -1,7 +1,7 @@
 from xmlrcp import connect, ClientException
 
 address = 'localhost'
-port = 8093
+port = 8098
 
 client = connect(address, port)
 
