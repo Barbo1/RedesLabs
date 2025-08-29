@@ -90,7 +90,7 @@ class Client(object):
             if data["type"]:
                 raise ClientException(data["faultCode"], data["faultString"])
             else:
-                data = data["data"][0]
+                data = data["data"]
 
             return data
 
