@@ -27,10 +27,10 @@ class Client(object):
     # Puerto mediante el cual se realiza la conexión.
     port = None
 
-    # Tiempo en milisegundos antes de timeout(cuando espera para enviar).
+    # Tiempo en segundos antes de timeout(cuando espera para enviar).
     SIMPLE_OP = 0.575
 
-    # Tiempo en milisegundos antes de timeout(cuando espera el resultado).
+    # Tiempo en segundos antes de timeout(cuando espera el resultado).
     COMPLEX_OP = 2.437
 
     def __init__(self, address, port):

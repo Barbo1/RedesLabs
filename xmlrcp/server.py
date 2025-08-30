@@ -1,5 +1,4 @@
 import socket
-from xmlrpc.client import loads
 from threading import Thread
 from . import http_utilities
 from . import xmlrpc_utilities
@@ -50,12 +49,12 @@ class Server(object):
 
             # Descompresion de XML_RPC.
             try:
-                xml_rpc = loads(data)
+                xml_rpc = xmlrpc_utilities.read_xmlrpc_request(data)
             except Exception:
                 data = xmlrpc_utilities.write_xmlrpc_error(1)
             else:
-                method = xml_rpc[1]
-                params = xml_rpc[0]
+                method = xml_rpc["method"]
+                params = xml_rpc["params"]
 
                 # validar que el metodo exista.
                 try:

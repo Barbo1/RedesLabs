@@ -14,7 +14,7 @@ import base64
 # returna una etiqueta 'value'.
 def write_value(info):
     if type(info) is str:
-        ret = "<int>" + info + "</int>"
+        ret = "<string>" + info + "</string>"
     elif type(info) is int:
         ret = "<int>" + str(info) + "</int>"
     elif type(info) is bool:
