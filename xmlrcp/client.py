@@ -88,7 +88,7 @@ class Client(object):
                 raise SyntaxError(FORMAT_ERROR)
 
             if data["type"]:
-                raise ClientException(data["faultCode"], data["faultString"])
+                raise ClientException(int(data["faultCode"]), data["faultString"])
             else:
                 data = data["data"]
 

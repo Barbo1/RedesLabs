@@ -72,6 +72,7 @@ class Server(object):
                     except Exception:
                         data = xmlrpc_utilities.write_xmlrpc_error(4)
 
+        print(data)
         # Envio de data.
         data = http_utilities.wrap_http_response(data, code, self.SERVER_NAME)
         socket_functions.send_socket(conn, data)
