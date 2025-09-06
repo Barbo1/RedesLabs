@@ -35,7 +35,7 @@ def write_value(info):
     elif type(info) in [list, tuple]:
         ret = ""
         for key in info:
-            ret += write_value(info[key])
+            ret += write_value(key)
         ret = "<array><data>" + ret + "</data></array>"
     else:
         raise Exception()
