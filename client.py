@@ -1,5 +1,4 @@
 from xmlrcp import connect, ClientException
-import time
 
 
 def test_client():

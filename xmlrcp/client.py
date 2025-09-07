@@ -7,7 +7,7 @@ FORMAT_ERROR = "La respuesta no es un XMLRPC response."
 CONNECTION_ERROR = "Hubo un problema en la conexion con el servidor."
 
 
-class ClientException(Exception):
+class XmlRrcException(Exception):
     def __init__(self, code, message):
         self.code = code
         self.message = message
@@ -21,17 +21,13 @@ class Client(object):
     # Largo del buffer que acepta un mensaje.
     buffer_size = 1024
 
-    # IP mediante la cual se realiza la conexión.
+    # información del servidor.
     address = None
-
-    # Puerto mediante el cual se realiza la conexión.
     port = None
 
-    # Tiempo en segundos antes de timeout(cuando espera para enviar).
-    SIMPLE_OP = 0.575
-
-    # Tiempo en segundos antes de timeout(cuando espera el resultado).
-    COMPLEX_OP = 2.437
+    # Tiempos de timeout en segundos.
+    REGULAR_TIME = 0.5
+    OPERATIONAL_TIME = 2.5
 
     def __init__(self, address, port):
         self.address = address
@@ -59,7 +55,7 @@ class Client(object):
 
             try:
                 sock.connect((self.address, self.port))
-                sock.settimeout(self.SIMPLE_OP)
+                sock.settimeout(self.REGULAR_TIME)
 
                 # Envio de datos.
                 sended = socket_functions.send_socket(sock, data)
@@ -68,7 +64,7 @@ class Client(object):
                     return
 
                 # recepcion de datos.
-                sock.settimeout(self.COMPLEX_OP)
+                sock.settimeout(self.OPERATIONAL_TIME)
                 readed = socket_functions.read_socket(sock, self.buffer_size)
                 if not readed["status"]:
                     sock.close()
@@ -88,7 +84,7 @@ class Client(object):
                 raise SyntaxError(FORMAT_ERROR)
 
             if data["type"]:
-                raise ClientException(int(data["faultCode"]), data["faultString"])
+                raise XmlRrcException(int(data["faultCode"]), data["faultString"])
             else:
                 data = data["data"]
 

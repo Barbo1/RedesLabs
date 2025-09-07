@@ -12,8 +12,8 @@ class Server(object):
     # Largo del buffer que acepta un mensaje.
     buffer_size = 1024
 
-    # Tiempo en milisegundos que espera antes de retornar timeout.
-    SIMPLE_OP = 0.575
+    # Tiempo en segundos que espera antes de retornar timeout.
+    REGULAR_TIME = 0.5
 
     # Nombre asociado al servidor, utilizado en la HTTP response.
     SERVER_NAME = "PythonPrueba/1.1.1"
@@ -29,7 +29,7 @@ class Server(object):
         self.threads_alive = []
 
     def handler(self, conn):
-        conn.settimeout(self.SIMPLE_OP)
+        conn.settimeout(self.REGULAR_TIME)
 
         # recepción y procesamiento de datos.
         readed = socket_functions.read_socket(conn, self.buffer_size)
@@ -72,7 +72,6 @@ class Server(object):
                     except Exception:
                         data = xmlrpc_utilities.write_xmlrpc_error(4)
 
-        print(data)
         # Envio de data.
         data = http_utilities.wrap_http_response(data, code, self.SERVER_NAME)
         socket_functions.send_socket(conn, data)
