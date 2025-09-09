@@ -7,7 +7,7 @@ FORMAT_ERROR = "La respuesta no es un XMLRPC response."
 CONNECTION_ERROR = "Hubo un problema en la conexion con el servidor."
 
 
-class XmlRrcException(Exception):
+class XmlRpcException(Exception):
     def __init__(self, code, message):
         self.code = code
         self.message = message
@@ -84,7 +84,7 @@ class Client(object):
                 raise SyntaxError(FORMAT_ERROR)
 
             if data["type"]:
-                raise XmlRrcException(int(data["faultCode"]), data["faultString"])
+                raise XmlRpcException(int(data["faultCode"]), data["faultString"])
             else:
                 data = data["data"]
 

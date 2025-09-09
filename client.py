@@ -1,4 +1,4 @@
-from xmlrcp import connect, ClientException
+from xmlrcp import connect, XmlRpcException
 
 
 def test_client():
@@ -55,7 +55,7 @@ def test_client():
     print('Iniciando pruebas de casos con errores SERVER 1.')
     try:
         serv1.division()
-    except ClientException as e:
+    except XmlRpcException as e:
         assert e.code == 3
         print('Llamada incorrecta sin parámetros. ', end="")
         print('Genera excepción necesaria con el mensaje:')
@@ -65,7 +65,7 @@ def test_client():
 
     try:
         serv1.multiplicacion('str1', 'str2')
-    except ClientException as e:
+    except XmlRpcException as e:
         assert e.code == 3
         print('Llamada con parametros incorrectos. ', end="")
         print('Genera excepción necesaria con el mensaje:')
@@ -75,7 +75,7 @@ def test_client():
 
     try:
         serv1.division(50, 0)
-    except ClientException as e:
+    except XmlRpcException as e:
         assert e.code == 4
         print('Llamada con divisor nulo. ', end="")
         print('Genera excepción necesaria con el mensaje:')
@@ -89,7 +89,7 @@ def test_client():
     print('Iniciando pruebas de casos con errores SERVER 2.')
     try:
         serv2.dot_prod([2, 3, 4])
-    except ClientException as e:
+    except XmlRpcException as e:
         assert e.code == 3
         print('Llamada con menos cantidad de parámetros. ', end="")
         print('Genera excepción necesaria con el mensaje:')
@@ -99,7 +99,7 @@ def test_client():
 
     try:
         serv2.dot_prod([2, 3, 4], [2, 3, 4], [2, 3, 4])
-    except ClientException as e:
+    except XmlRpcException as e:
         assert e.code == 3
         print('Llamada con más cantidad de parámetros. ', end="")
         print('Genera excepción necesaria con el mensaje:')
@@ -109,7 +109,7 @@ def test_client():
 
     try:
         serv2.matrix_sum([[1, 2], [3, 4]], [[5, 6], [7, 8]])
-    except ClientException as e:
+    except XmlRpcException as e:
         assert e.code == 2
         print('Metodo no existente. ', end="")
         print('Genera excepción necesaria con el mensaje:')
