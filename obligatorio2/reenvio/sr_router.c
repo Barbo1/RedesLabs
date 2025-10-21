@@ -114,10 +114,11 @@ void sr_send_icmp_error_packet(uint8_t type,
 
   /* Envio y elimino el paquete. */
   uint32_t ip_next_hop = match->gw.s_addr;
-  struct sr_arpentry* entry = sr_arpcache_lookup(&sr->cache, ip_next_hop);
   struct sr_if* to_next_hop = sr_get_interface_given_ip(sr, ip_next_hop);
+  memcpy(eth_packet->ether_shost, to_next_hop->addr, ETHER_ADDR_LEN);
+
+  struct sr_arpentry* entry = sr_arpcache_lookup(&sr->cache, ip_next_hop);
   if (entry) {
-    memcpy(eth_packet->ether_shost, to_next_hop->addr, ETHER_ADDR_LEN);
     memcpy(eth_packet->ether_dhost, entry->mac, ETHER_ADDR_LEN);
     sr_send_packet(sr, packet, len, match->interface);
   } else {
@@ -206,10 +207,11 @@ void sr_handle_ip_packet(struct sr_instance *sr,
 
   } else if ((rt_entry = find_longest_match(sr, dest))) {
     uint32_t ip_next_hop = rt_entry->gw.s_addr;
-    struct sr_arpentry* entry = sr_arpcache_lookup(&sr->cache, ip_next_hop);
     struct sr_if* to_next_hop = sr_get_interface_given_ip(sr, ip_next_hop);
+    memcpy(eth_packet->ether_shost, to_next_hop->addr, ETHER_ADDR_LEN);
+
+    struct sr_arpentry* entry = sr_arpcache_lookup(&sr->cache, ip_next_hop);
     if (entry) {
-      memcpy(eth_packet->ether_shost, to_next_hop->addr, ETHER_ADDR_LEN);
       memcpy(eth_packet->ether_dhost, entry->mac, ETHER_ADDR_LEN);
       sr_send_packet(sr, packet, len, rt_entry->interface);
     } else {
@@ -237,15 +239,47 @@ void sr_handle_arp_packet(struct sr_instance *sr,
 
   struct sr_arp_hdr* arp_packet = (sr_arp_hdr_t*)(packet + sizeof(sr_ethernet_hdr_t));
 
-  if (arp_packet->ar_op == arp_op_request) {
+  /* Obtengo interfaz asociada. */
+  struct sr_if* inter = sr_get_interface(sr, interface);
+
+  if (arp_packet->ar_op == arp_op_request && memcmp("FFFFFFFFFFFF", arp_packet->ar_tha, ETHER_ADDR_LEN) == 0) {
     /* evaluar formato de las direcciones de hardware? */
 
     struct sr_arpentry* arp_entry_cache = sr_arpcache_lookup(&sr->cache, arp_packet->ar_sip);
     if (arp_entry_cache == NULL) {
-      sr_arpcache_insert(&sr->cache, arp_packet->ar_sha, arp_packet->ar_sip);
+      struct sr_arpreq* req = sr_arpcache_insert(&sr->cache, arp_packet->ar_sha, arp_packet->ar_sip);
+      if (req) {
+        struct sr_packet* packets = req->packets;
+        while (packets) {
+          struct sr_arp_hdr* arp_packet_it = (sr_arp_hdr_t*)(packets->buf + sizeof(sr_ethernet_hdr_t));
+          memcpy(arp_packet_it->ar_tha, arp_packet->ar_sha, ETHER_ADDR_LEN);
+          sr_send_packet(sr, packets->buf, packets->len, packets->iface);
+          packets = packets->next;
+        }
+        sr_arpreq_destroy(&sr->cache, req);
+      }
     }
-  } else if (arp_packet->ar_op == arp_op_reply) {
 
+    /* Cambio los datos para reenviar el paquete. */
+    memcpy (arp_packet->ar_tha, arp_packet->ar_sha, ETHER_ADDR_LEN);
+    arp_packet->ar_tip = arp_packet->ar_sip;
+    arp_packet->ar_sip = inter->ip;
+    memcpy (arp_packet->ar_sha, inter->addr, ETHER_ADDR_LEN);
+    arp_packet->ar_op = arp_op_reply;
+
+    /* Envio paquete. */
+    sr_send_packet(sr, packet, len, inter->name);
+
+  } else if (arp_packet->ar_op == arp_op_reply && memcmp(inter->addr, arp_packet->ar_tha, ETHER_ADDR_LEN) == 0) {
+    struct sr_arpreq* req = sr_arpcache_insert(&sr->cache, arp_packet->ar_sha, arp_packet->ar_sip);
+    struct sr_packet* packets = req->packets;
+    while (packets) {
+      struct sr_arp_hdr* arp_packet_it = (sr_arp_hdr_t*)(packets->buf + sizeof(sr_ethernet_hdr_t));
+      memcpy(arp_packet_it->ar_tha, arp_packet->ar_sha, ETHER_ADDR_LEN);
+      sr_send_packet(sr, packets->buf, packets->len, packets->iface);
+      packets = packets->next;
+    }
+    sr_arpreq_destroy(&sr->cache, req);
   }
 
   /* COLOQUE SU CÓDIGO AQUÍ
