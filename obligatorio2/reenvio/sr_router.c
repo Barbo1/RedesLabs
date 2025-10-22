@@ -79,24 +79,24 @@ void sr_send_icmp_error_packet(uint8_t type,
 
   /* Lleno la parte de Ethernet. */
   struct sr_ethernet_hdr* eth_packet = (sr_ethernet_hdr_t*)packet;
-  eth_packet->ether_type = htons(ethertype_arp);
+  eth_packet->ether_type = htons(ethertype_ip);
 
   /* Busco interfaz de salida. */
-  struct sr_rt* match = find_longest_match(sr, ip_prev_packet->ip_src);
+  struct sr_rt* match = find_longest_match(sr, ipDst);
+  struct sr_if* match_if = sr_get_interface(sr, match->interface);
 
   /* Lleno la parte de IP. */
   struct sr_ip_hdr* ip_packet = (sr_ip_hdr_t*)(packet + sizeof (sr_ethernet_hdr_t));
   ip_packet->ip_hl = sizeof (sr_ip_hdr_t) / 4;
   ip_packet->ip_v = 4;
-  ip_packet->ip_tos = 0;
   ip_packet->ip_len = sizeof (sr_ip_hdr_t) + sizeof(sr_icmp_t3_hdr_t);
+  ip_packet->ip_tos = 0;
   ip_packet->ip_id = 0;
   ip_packet->ip_off = 0;
   ip_packet->ip_ttl = 32;
   ip_packet->ip_p = ip_protocol_icmp;
-  ip_packet->ip_src = match->gw.s_addr;
-  ip_packet->ip_dst = ip_prev_packet->ip_src;
-  ip_packet->ip_sum = ip_cksum(ip_packet, sizeof(sr_ip_hdr_t));
+  ip_packet->ip_src = match_if->ip;
+  ip_packet->ip_dst = ipDst;
   
   /* Lleno la parte de ICMP contemplada por el cabezal. */
   struct sr_icmp_t3_hdr* icmp_packet = (sr_icmp_t3_hdr_t*)(packet + sizeof(sr_ethernet_hdr_t) + sizeof(sr_ip_hdr_t));
@@ -106,6 +106,8 @@ void sr_send_icmp_error_packet(uint8_t type,
   icmp_packet->next_mtu = 0;
   memcpy(icmp_packet->data, ipPacket, ICMP_DATA_SIZE);
   icmp_packet->icmp_sum = icmp3_cksum (icmp_packet, sizeof(sr_icmp_t3_hdr_t));
+  
+  ip_packet->ip_sum = ip_cksum(ip_packet, sizeof(sr_ip_hdr_t) + sizeof(sr_icmp_t3_hdr_t));
 
   printf("impresion de paquete hecho para retornar un error: ");
   print_hdr_ip((uint8_t*)ip_packet);
@@ -114,15 +116,14 @@ void sr_send_icmp_error_packet(uint8_t type,
 
   /* Envio y elimino el paquete. */
   uint32_t ip_next_hop = match->gw.s_addr;
-  struct sr_if* to_next_hop = sr_get_interface_given_ip(sr, ip_next_hop);
-  memcpy(eth_packet->ether_shost, to_next_hop->addr, ETHER_ADDR_LEN);
+  memcpy(eth_packet->ether_shost, match_if->addr, ETHER_ADDR_LEN);
 
   struct sr_arpentry* entry = sr_arpcache_lookup(&sr->cache, ip_next_hop);
   if (entry) {
     memcpy(eth_packet->ether_dhost, entry->mac, ETHER_ADDR_LEN);
     sr_send_packet(sr, packet, len, match->interface);
   } else {
-    struct sr_arpreq* req = sr_arpcache_queuereq(&sr->cache, ip_next_hop, packet, len, to_next_hop->name);
+    struct sr_arpreq* req = sr_arpcache_queuereq(&sr->cache, ip_next_hop, packet, len, match_if->name);
     handle_arpreq(sr, req);
   }
   free(packet);
@@ -173,7 +174,7 @@ void sr_handle_ip_packet(struct sr_instance *sr,
         struct sr_ethernet_hdr* eth_new_packet = (sr_ethernet_hdr_t*)new_packet;
         memcpy(eth_new_packet->ether_shost, destAddr, ETHER_ADDR_LEN);
         memcpy(eth_new_packet->ether_dhost, srcAddr, ETHER_ADDR_LEN);
-        eth_new_packet->ether_type = htons(ethertype_arp);
+        eth_new_packet->ether_type = htons(ethertype_ip);
 
         /* Lleno la parte de IP. */
         struct sr_ip_hdr* ip_new_packet = (sr_ip_hdr_t*)(packet + sizeof (sr_ethernet_hdr_t));
@@ -181,18 +182,19 @@ void sr_handle_ip_packet(struct sr_instance *sr,
         uint32_t ip_res = ip_new_packet->ip_src;
         ip_new_packet->ip_src = ip_new_packet->ip_dst;
         ip_new_packet->ip_dst = ip_res;
-        ip_new_packet->ip_sum = ip_cksum(ip_new_packet, sizeof(sr_ip_hdr_t));
         
         /* Lleno la parte de ICMP contemplada por el cabezal. */
         struct sr_icmp_hdr* icmp_new_packet = (sr_icmp_hdr_t*)(packet + icmp_pos);
         icmp_new_packet->icmp_type = 0;
         icmp_new_packet->icmp_code = 0;
-        icmp_new_packet->icmp_sum = icmp_cksum (icmp_new_packet, icmp_len);
 
         /* Lleno la parte de ICMP que falta para el paquete echo reply. */
         uint8_t* new_packet_icmp_comps = (uint8_t*)(packet + sizeof(sr_icmp_hdr_t) + icmp_pos);
         memset(new_packet_icmp_comps, 0, 4);
         memcpy(new_packet_icmp_comps + 4, packet + icmp_pos, prev_data_len);
+        
+        icmp_new_packet->icmp_sum = icmp_cksum (icmp_new_packet, icmp_len);
+        ip_new_packet->ip_sum = ip_cksum(ip_new_packet, sizeof(sr_ip_hdr_t) + icmp_len);
 
         printf("Impresion de paquete ICMP reply: ");
         print_hdr_ip((uint8_t*)ip_packet);
@@ -207,20 +209,20 @@ void sr_handle_ip_packet(struct sr_instance *sr,
 
   } else if ((rt_entry = find_longest_match(sr, dest))) {
     uint32_t ip_next_hop = rt_entry->gw.s_addr;
-    struct sr_if* to_next_hop = sr_get_interface_given_ip(sr, ip_next_hop);
-    memcpy(eth_packet->ether_shost, to_next_hop->addr, ETHER_ADDR_LEN);
+    struct sr_if* exit_inter = sr_get_interface(sr, rt_entry->interface);
+    memcpy(eth_packet->ether_shost, exit_inter->addr, ETHER_ADDR_LEN);
 
     struct sr_arpentry* entry = sr_arpcache_lookup(&sr->cache, ip_next_hop);
     if (entry) {
       memcpy(eth_packet->ether_dhost, entry->mac, ETHER_ADDR_LEN);
       sr_send_packet(sr, packet, len, rt_entry->interface);
     } else {
-      struct sr_arpreq* req = sr_arpcache_queuereq(&sr->cache, ip_next_hop, packet, len, to_next_hop->name);
+      struct sr_arpreq* req = sr_arpcache_queuereq(&sr->cache, ip_next_hop, packet, len, exit_inter->name);
       handle_arpreq(sr, req);
     }
 
   } else {
-    sr_send_icmp_error_packet(3, 1, sr, src, (uint8_t*)ip_packet);
+    sr_send_icmp_error_packet(3, 0, sr, src, (uint8_t*)ip_packet);
   }
 }
 

@@ -2,6 +2,7 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <stdio.h>
+#include <sys/types.h>
 #include <time.h>
 #include <unistd.h>
 #include <pthread.h>
@@ -23,9 +24,7 @@ void sr_arp_request_send(struct sr_instance *sr, uint32_t ip) {
   uint8_t *arpPacket = malloc(arpPacketLen);
   sr_ethernet_hdr_t *ethHdr = (struct sr_ethernet_hdr *) arpPacket;
 
-  struct sr_if* my_interface = ;
-
-
+  struct sr_if* my_interface = sr_get_interface_given_ip(sr, ip);
 
   memcpy(ethHdr->ether_dhost, "FFFFFFFFFFFF", ETHER_ADDR_LEN);
   memcpy(ethHdr->ether_shost, my_interface->addr, sizeof(uint8_t) * ETHER_ADDR_LEN);
@@ -38,9 +37,11 @@ void sr_arp_request_send(struct sr_instance *sr, uint32_t ip) {
   arpHdr->ar_pln = 4;
   arpHdr->ar_op = htons(arp_op_request);
   memcpy(arpHdr->ar_sha, my_interface->addr, ETHER_ADDR_LEN);
-  memcpy(arpHdr->ar_tha, "FFFFFFFFFFFF", ETHER_ADDR_LEN);
-  arpHdr->ar_sip = <sender IP>;
+  arpHdr->ar_sip = my_interface->ip;
   arpHdr->ar_tip = ip;
+
+  sr_send_packet(sr, arpPacket, arpPacketLen, my_interface->name);
+  free(arpPacket);
 
   /* 
   * COLOQUE AQÍ SU CÓDIGO
@@ -70,7 +71,15 @@ void handle_arpreq(struct sr_instance *sr, struct sr_arpreq *req) {
 
 /* Envía un mensaje ICMP host unreachable a los emisores de los paquetes esperando en la cola de una solicitud ARP */
 void host_unreachable(struct sr_instance *sr, struct sr_arpreq *req) {
-    /* COLOQUE SU CÓDIGO AQUÍ */
+  if (req) {
+    struct sr_packet* packets = req->packets;
+    while (packets) {
+      struct sr_ip_hdr* ip_packet_it = (sr_ip_hdr_t*)(packets->buf + sizeof(sr_ethernet_hdr_t));
+      sr_send_icmp_error_packet(3, 1, sr, ip_packet_it->ip_src, (uint8_t*)ip_packet_it);
+      packets = packets->next;
+    }
+    sr_arpreq_destroy(&sr->cache, req);
+  }
 }
 
 /* NO DEBERÍA TENER QUE MODIFICAR EL CÓDIGO A PARTIR DE AQUÍ. */
@@ -159,8 +168,8 @@ struct sr_arpreq *sr_arpcache_queuereq(struct sr_arpcache *cache,
         new_pkt->next = req->packets;
         req->packets = new_pkt;
     }
-    
-    pthread_mutex_unlock(&(cache->lock));
+  
+  pthread_mutex_unlock(&(cache->lock));
     
     return req;
 }
