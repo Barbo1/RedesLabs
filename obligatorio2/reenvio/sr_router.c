@@ -94,12 +94,12 @@ void sr_send_icmp_error_packet(uint8_t type,
 
   /* Busco interfaz de salida. */
   struct sr_rt* match = find_longest_prefix_match(sr, ipDst);
-  if (!match) { // si no se encontró una entrada en la tabla de enrutamiento para la IP de destino, libero el paquete y retorno
+  if (!match) { /* si no se encontró una entrada en la tabla de enrutamiento para la IP de destino, libero el paquete y retorno */
     free(packet);
     return;
   }
   struct sr_if* match_if = sr_get_interface(sr, match->interface);
-  if (!match_if) { // si no se encontró una interfaz para la entrada de la tabla de enrutamiento, libero el paquete y retorno
+  if (!match_if) { /* si no se encontró una interfaz para la entrada de la tabla de enrutamiento, libero el paquete y retorno */
     free(packet);
     return;
   }
@@ -188,7 +188,7 @@ void sr_handle_ip_packet(struct sr_instance *sr,
   struct sr_if* my_interface = sr_get_interface_given_ip(sr, dest);
   struct sr_rt* rt_entry;
   if (my_interface) {
-      // Manejo ICMP echo request
+      /* Manejo ICMP echo request */
     if (ip_packet->ip_p == ip_protocol_icmp) {
       int icmp_pos = sizeof (sr_ethernet_hdr_t) + sizeof(sr_ip_hdr_t);
       struct sr_icmp_hdr* icmp_packet = (sr_icmp_hdr_t*)(packet + icmp_pos);
@@ -203,15 +203,15 @@ void sr_handle_ip_packet(struct sr_instance *sr,
 
         /* Lleno la parte de Ethernet. */
         struct sr_ethernet_hdr* eth_new_packet = (sr_ethernet_hdr_t*)new_packet;
-        memcpy(eth_new_packet->ether_shost, my_interface->addr, ETHER_ADDR_LEN); // el router es el que responde
+        memcpy(eth_new_packet->ether_shost, my_interface->addr, ETHER_ADDR_LEN); /* el router es el que responde */
         memcpy(eth_new_packet->ether_dhost, srcAddr, ETHER_ADDR_LEN);
         eth_new_packet->ether_type = htons(ethertype_ip);
 
         /* Lleno la parte de IP. */
         struct sr_ip_hdr* ip_new_packet = (sr_ip_hdr_t*)(new_packet + sizeof (sr_ethernet_hdr_t));
         memcpy(ip_new_packet, ip_packet, sizeof(sr_ip_hdr_t));
-        ip_new_packet->ip_src = my_interface->ip; // es la ip del router
-        ip_new_packet->ip_dst = src; // es la ip del cliente que envió el echo request
+        ip_new_packet->ip_src = my_interface->ip; /* es la ip del router */
+        ip_new_packet->ip_dst = src; /* es la ip del cliente que envió el echo request */
         
         /* Lleno la parte de ICMP contemplada por el cabezal. */
         struct sr_icmp_hdr* icmp_new_packet = (sr_icmp_hdr_t*)(new_packet + icmp_pos);
@@ -281,12 +281,12 @@ void sr_handle_arp_packet(struct sr_instance *sr,
 
   uint8_t broadcast_mac[ETHER_ADDR_LEN] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
   if (arp_packet->ar_op == arp_op_request && 
-    memcmp(arp_packet->ar_tha, broadcast_mac, ETHER_ADDR_LEN) == 0) { //memcmp compara byte a byte no strings
+    memcmp(arp_packet->ar_tha, broadcast_mac, ETHER_ADDR_LEN) == 0) { /* memcmp compara byte a byte no strings */
   
-  // Verificar si el ARP request es para una IP del router
+  /* Verifico si el ARP request es para una IP del router */
   struct sr_if* target_interface = sr_get_interface_given_ip(sr, arp_packet->ar_tip);
   if (target_interface) {
-    // Es para nosotros, responder con ARP reply
+    /* Es para nosotros, responder con ARP reply */
     memcpy (arp_packet->ar_tha, arp_packet->ar_sha, ETHER_ADDR_LEN);
     arp_packet->ar_tip = arp_packet->ar_sip;
     arp_packet->ar_sip = target_interface->ip;
@@ -295,9 +295,9 @@ void sr_handle_arp_packet(struct sr_instance *sr,
 
     sr_send_packet(sr, packet, len, target_interface->name);
   } 
-    // Si no es para nosotros, ignorar el ARP request
+    /* Si no es para nosotros, ignorar el ARP request */
   } else if (arp_packet->ar_op == arp_op_reply && memcmp(inter->addr, arp_packet->ar_tha, ETHER_ADDR_LEN) == 0) {
-    // ARP reply para nosotros, actualizar caché y enviar paquetes pendientes
+    /* ARP reply para nosotros, actualizar caché y enviar paquetes pendientes */
     struct sr_arpreq* req = sr_arpcache_insert(&sr->cache, arp_packet->ar_sha, arp_packet->ar_sip);
     if (req) {
       struct sr_packet* packets = req->packets;
