@@ -17,8 +17,6 @@
 /*
 	Envía una solicitud ARP.
 */
-
-/* Cual debe ser la ip que se pasa por parametro? */
 void sr_arp_request_send(struct sr_instance *sr, uint32_t ip) {
   printf("$$$ -> Send ARP request.\n");
 
@@ -28,7 +26,8 @@ void sr_arp_request_send(struct sr_instance *sr, uint32_t ip) {
 
   struct sr_if* my_interface = sr_get_interface_given_ip(sr, ip);
 
-  memcpy(ethHdr->ether_dhost, "FFFFFFFFFFFF", ETHER_ADDR_LEN);
+  uint8_t broadcast_mac[ETHER_ADDR_LEN] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
+  memcpy(ethHdr->ether_dhost, broadcast_mac, ETHER_ADDR_LEN);
   memcpy(ethHdr->ether_shost, my_interface->addr, sizeof(uint8_t) * ETHER_ADDR_LEN);
   ethHdr->ether_type = htons(ethertype_arp);
 
@@ -39,8 +38,8 @@ void sr_arp_request_send(struct sr_instance *sr, uint32_t ip) {
   arpHdr->ar_pln = 4;
   arpHdr->ar_op = htons(arp_op_request);
   memcpy(arpHdr->ar_sha, my_interface->addr, ETHER_ADDR_LEN);
-  arpHdr->ar_sip = ip;
-  arpHdr->ar_tip = my_interface->;
+  arpHdr->ar_sip = my_interface->ip;
+  arpHdr->ar_tip = ip;
 
   sr_send_packet(sr, arpPacket, arpPacketLen, my_interface->name);
   free(arpPacket);
@@ -68,7 +67,24 @@ void sr_arp_request_send(struct sr_instance *sr, uint32_t ip) {
   - no olvide actualizar los campos de la solicitud luego de reenviarla
 */
 void handle_arpreq(struct sr_instance *sr, struct sr_arpreq *req) {
-    /* COLOQUE SU CÓDIGO AQUÍ */
+    if (!req) {
+        return;
+    }
+    time_t current_time = time(NULL);
+    // Verifico si paso mas de 1 segundo desde el ultimo envio
+    if (difftime(current_time, req->sent) >= 1.0) {
+        // Verifico si se han enviado menos de 5 solicitudes
+        if (req->times_sent < 5) {
+            // Envio nueva solicitud ARP
+            sr_arp_request_send(sr, req->ip);
+            req->sent = current_time;
+            req->times_sent++;
+        } else {
+            // Se han enviado 5 solicitudes sin respuesta, envio ICMP host unreachable y descarto la solicitud
+            host_unreachable(sr, req);
+        }
+    }
+
 }
 
 /* Envía un mensaje ICMP host unreachable a los emisores de los paquetes esperando en la cola de una solicitud ARP */
@@ -325,4 +341,5 @@ void *sr_arpcache_timeout(void *sr_ptr) {
     
     return NULL;
 }
+
 
