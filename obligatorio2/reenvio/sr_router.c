@@ -50,28 +50,17 @@ void sr_init(struct sr_instance* sr)
 
 } /* -- sr_init -- */
 
-struct sr_rt* find_longest_prefix_match (struct sr_instance* sr, uint32_t ip) {
-  struct sr_rt* rt_entry = sr->routing_table;
-  struct sr_rt* best_entry = NULL;
-  uint32_t best_mask_len = 0;
+struct sr_rt* find_longest_match (struct sr_instance* sr, uint32_t ip) {
+  struct sr_rt* rt_entry = sr->routing_table, *best_entry = 0;
+  uint32_t best = 0, match = 0;
   while (rt_entry) {
-    /* Verificar si la IP coincide con esta entrada. Aplico la mascara de la entrada a la IP y a la IP de destino. */
-    if ((rt_entry->dest.s_addr & rt_entry->mask.s_addr) == (ip & rt_entry->mask.s_addr)) {
-      uint32_t mask_len = 0;
-      uint32_t mask = ntohl(rt_entry->mask.s_addr);
-      /* Cuanto mas a la izquierda esté la mascara, mas bits coinciden. */
-      while (mask & 0x80000000) {
-          mask_len++;
-          mask <<= 1;
-      }
-      if (mask_len > best_mask_len) {
-        best_mask_len = mask_len;
-        best_entry = rt_entry;
-      }
-    }
-    rt_entry = rt_entry->next;
+    match = rt_entry->dest.s_addr ^ (rt_entry->mask.s_addr & ip);
+    if (match < best) {
+      match = best;
+      best_entry = rt_entry;
+    };
   }
-  return best_entry;
+  return rt_entry;
 }
 
 /* Envía un paquete ICMP de error */
