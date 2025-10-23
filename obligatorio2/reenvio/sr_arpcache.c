@@ -71,16 +71,16 @@ void handle_arpreq(struct sr_instance *sr, struct sr_arpreq *req) {
         return;
     }
     time_t current_time = time(NULL);
-    // Verifico si paso mas de 1 segundo desde el ultimo envio
+    /* Verifico si paso mas de 1 segundo desde el ultimo envio */
     if (difftime(current_time, req->sent) >= 1.0) {
-        // Verifico si se han enviado menos de 5 solicitudes
+        /* Verifico si se han enviado menos de 5 solicitudes */
         if (req->times_sent < 5) {
-            // Envio nueva solicitud ARP
+            /* Envio nueva solicitud ARP */
             sr_arp_request_send(sr, req->ip);
             req->sent = current_time;
             req->times_sent++;
         } else {
-            // Se han enviado 5 solicitudes sin respuesta, envio ICMP host unreachable y descarto la solicitud
+            /* Se han enviado 5 solicitudes sin respuesta, envio ICMP host unreachable y descarto la solicitud */
             host_unreachable(sr, req);
         }
     }
@@ -341,5 +341,4 @@ void *sr_arpcache_timeout(void *sr_ptr) {
     
     return NULL;
 }
-
 
