@@ -63,6 +63,31 @@ struct sr_rt* find_longest_match (struct sr_instance* sr, uint32_t ip) {
   return rt_entry;
 }
 
+/* Envía todos los paquetes IP pendientes de una solicitud ARP */
+void sr_arp_reply_send_pending_packets(struct sr_instance *sr,
+                                        struct sr_arpreq *arpReq,
+                                        uint8_t *dhost,
+                                        uint8_t *shost,
+                                        struct sr_if *iface) {
+
+  struct sr_packet *currPacket = arpReq->packets;
+  sr_ethernet_hdr_t *ethHdr;
+  uint8_t *copyPacket;
+
+  while (currPacket != NULL) {
+     ethHdr = (sr_ethernet_hdr_t *) currPacket->buf;
+     memcpy(ethHdr->ether_shost, shost, sizeof(uint8_t) * ETHER_ADDR_LEN);
+     memcpy(ethHdr->ether_dhost, dhost, sizeof(uint8_t) * ETHER_ADDR_LEN);
+
+     copyPacket = malloc(sizeof(uint8_t) * currPacket->len);
+     memcpy(copyPacket, ethHdr, sizeof(uint8_t) * currPacket->len);
+
+     print_hdrs(copyPacket, currPacket->len);
+     sr_send_packet(sr, copyPacket, currPacket->len, iface->name);
+     currPacket = currPacket->next;
+  }
+}
+
 /* Envía un paquete ICMP de error */
 void sr_send_icmp_error_packet(uint8_t type,
                               uint8_t code,
@@ -105,8 +130,8 @@ void sr_send_icmp_error_packet(uint8_t type,
   icmp_packet->unused = 0;
   icmp_packet->next_mtu = 0;
   memcpy(icmp_packet->data, ipPacket, ICMP_DATA_SIZE);
+
   icmp_packet->icmp_sum = icmp3_cksum (icmp_packet, sizeof(sr_icmp_t3_hdr_t));
-  
   ip_packet->ip_sum = ip_cksum(ip_packet, sizeof(sr_ip_hdr_t) + sizeof(sr_icmp_t3_hdr_t));
 
   printf("impresion de paquete hecho para retornar un error: ");
@@ -114,7 +139,7 @@ void sr_send_icmp_error_packet(uint8_t type,
   print_hdr_eth((uint8_t*)eth_packet);
   print_hdr_icmp((uint8_t*)icmp_packet);
 
-  /* Envio y elimino el paquete. */
+  /* Envio paquete. */
   uint32_t ip_next_hop = match->gw.s_addr;
   memcpy(eth_packet->ether_shost, match_if->addr, ETHER_ADDR_LEN);
 
@@ -127,7 +152,6 @@ void sr_send_icmp_error_packet(uint8_t type,
     handle_arpreq(sr, req);
   }
   free(packet);
-
 } /* -- sr_send_icmp_error_packet -- */
 
 
@@ -158,6 +182,7 @@ void sr_handle_ip_packet(struct sr_instance *sr,
   struct sr_if* my_interface = sr_get_interface_given_ip(sr, dest);
   struct sr_rt* rt_entry;
   if (my_interface) {
+    /* realizar control de type of service. */
     if (ip_packet->ip_p == ip_protocol_icmp) {
       int icmp_pos = sizeof (sr_ethernet_hdr_t) + sizeof(sr_ip_hdr_t);
       struct sr_icmp_hdr* icmp_packet = (sr_icmp_hdr_t*)(packet + icmp_pos);
@@ -239,6 +264,7 @@ void sr_handle_arp_packet(struct sr_instance *sr,
   printf("*** -> It is an ARP packet. Print ARP header.\n");
   print_hdr_arp(packet + sizeof(sr_ethernet_hdr_t));
 
+  struct sr_ethernet_hdr* eth_packet = (sr_ethernet_hdr_t*)packet;
   struct sr_arp_hdr* arp_packet = (sr_arp_hdr_t*)(packet + sizeof(sr_ethernet_hdr_t));
 
   /* Obtengo interfaz asociada. */
@@ -251,13 +277,7 @@ void sr_handle_arp_packet(struct sr_instance *sr,
     if (arp_entry_cache == NULL) {
       struct sr_arpreq* req = sr_arpcache_insert(&sr->cache, arp_packet->ar_sha, arp_packet->ar_sip);
       if (req) {
-        struct sr_packet* packets = req->packets;
-        while (packets) {
-          struct sr_arp_hdr* arp_packet_it = (sr_arp_hdr_t*)(packets->buf + sizeof(sr_ethernet_hdr_t));
-          memcpy(arp_packet_it->ar_tha, arp_packet->ar_sha, ETHER_ADDR_LEN);
-          sr_send_packet(sr, packets->buf, packets->len, packets->iface);
-          packets = packets->next;
-        }
+        sr_arp_reply_send_pending_packets(sr, req, arp_packet->ar_sha, arp_packet->ar_tha, inter);
         sr_arpreq_destroy(&sr->cache, req);
       }
     }
@@ -269,18 +289,15 @@ void sr_handle_arp_packet(struct sr_instance *sr,
     memcpy (arp_packet->ar_sha, inter->addr, ETHER_ADDR_LEN);
     arp_packet->ar_op = arp_op_reply;
 
+    memcpy (eth_packet->ether_dhost, eth_packet->ether_shost, ETHER_ADDR_LEN);
+    memcpy (eth_packet->ether_shost, inter->addr, ETHER_ADDR_LEN);
+
     /* Envio paquete. */
     sr_send_packet(sr, packet, len, inter->name);
 
   } else if (arp_packet->ar_op == arp_op_reply && memcmp(inter->addr, arp_packet->ar_tha, ETHER_ADDR_LEN) == 0) {
     struct sr_arpreq* req = sr_arpcache_insert(&sr->cache, arp_packet->ar_sha, arp_packet->ar_sip);
-    struct sr_packet* packets = req->packets;
-    while (packets) {
-      struct sr_arp_hdr* arp_packet_it = (sr_arp_hdr_t*)(packets->buf + sizeof(sr_ethernet_hdr_t));
-      memcpy(arp_packet_it->ar_tha, arp_packet->ar_sha, ETHER_ADDR_LEN);
-      sr_send_packet(sr, packets->buf, packets->len, packets->iface);
-      packets = packets->next;
-    }
+    sr_arp_reply_send_pending_packets(sr, req, arp_packet->ar_sha, arp_packet->ar_tha, inter);
     sr_arpreq_destroy(&sr->cache, req);
   }
 
@@ -297,31 +314,6 @@ void sr_handle_arp_packet(struct sr_instance *sr,
 /* 
 * ***** A partir de aquí no debería tener que modificar nada ****
 */
-
-/* Envía todos los paquetes IP pendientes de una solicitud ARP */
-void sr_arp_reply_send_pending_packets(struct sr_instance *sr,
-                                        struct sr_arpreq *arpReq,
-                                        uint8_t *dhost,
-                                        uint8_t *shost,
-                                        struct sr_if *iface) {
-
-  struct sr_packet *currPacket = arpReq->packets;
-  sr_ethernet_hdr_t *ethHdr;
-  uint8_t *copyPacket;
-
-  while (currPacket != NULL) {
-     ethHdr = (sr_ethernet_hdr_t *) currPacket->buf;
-     memcpy(ethHdr->ether_shost, shost, sizeof(uint8_t) * ETHER_ADDR_LEN);
-     memcpy(ethHdr->ether_dhost, dhost, sizeof(uint8_t) * ETHER_ADDR_LEN);
-
-     copyPacket = malloc(sizeof(uint8_t) * currPacket->len);
-     memcpy(copyPacket, ethHdr, sizeof(uint8_t) * currPacket->len);
-
-     print_hdrs(copyPacket, currPacket->len);
-     sr_send_packet(sr, copyPacket, currPacket->len, iface->name);
-     currPacket = currPacket->next;
-  }
-}
 
 /*---------------------------------------------------------------------
  * Method: sr_handlepacket(uint8_t* p,char* interface)

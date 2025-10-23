@@ -17,6 +17,8 @@
 /*
 	Envía una solicitud ARP.
 */
+
+/* Cual debe ser la ip que se pasa por parametro? */
 void sr_arp_request_send(struct sr_instance *sr, uint32_t ip) {
   printf("$$$ -> Send ARP request.\n");
 
@@ -37,8 +39,8 @@ void sr_arp_request_send(struct sr_instance *sr, uint32_t ip) {
   arpHdr->ar_pln = 4;
   arpHdr->ar_op = htons(arp_op_request);
   memcpy(arpHdr->ar_sha, my_interface->addr, ETHER_ADDR_LEN);
-  arpHdr->ar_sip = my_interface->ip;
-  arpHdr->ar_tip = ip;
+  arpHdr->ar_sip = ip;
+  arpHdr->ar_tip = my_interface->;
 
   sr_send_packet(sr, arpPacket, arpPacketLen, my_interface->name);
   free(arpPacket);
