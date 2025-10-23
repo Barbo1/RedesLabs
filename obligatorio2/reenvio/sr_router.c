@@ -50,7 +50,7 @@ void sr_init(struct sr_instance* sr)
 
 } /* -- sr_init -- */
 
-struct sr_rt* find_longest_match (struct sr_instance* sr, uint32_t ip) {
+struct sr_rt* find_longest_prefix_match (struct sr_instance* sr, uint32_t ip) {
   struct sr_rt* rt_entry = sr->routing_table, *best_entry = 0;
   uint32_t best = 0, match = 0;
   while (rt_entry) {
@@ -83,7 +83,7 @@ void sr_send_icmp_error_packet(uint8_t type,
 
   /* Busco interfaz de salida. */
   struct sr_rt* match = find_longest_prefix_match(sr, ipDst);
-  if (!match) { /* si no se encontró una entrada en la tabla de enrutamiento para la IP de destino, libero el paquete y retorno */
+  if (!match) {
     free(packet);
     return;
   }
@@ -155,7 +155,7 @@ void sr_handle_ip_packet(struct sr_instance *sr,
   uint32_t src = ip_packet->ip_src;
   uint32_t dest = ip_packet->ip_dst;
   
-  
+  /* Esto de aca se controla en la ultima funcion--------------------------- */
   /* Sanidad del paquete entrante. Longitud minima. */
   if (len < sizeof(sr_ethernet_hdr_t) + sizeof(sr_ip_hdr_t)) {
     printf("Packet too short, dropping\n");
@@ -166,6 +166,8 @@ void sr_handle_ip_packet(struct sr_instance *sr,
     printf("Invalid IP checksum, dropping packet\n");
     return;
   }
+  /* ----------------------------------------------------------------------- */
+
   /* disminuyo TTL y recalculo el checksum. */
   ip_packet->ip_ttl--;
   if (ip_packet->ip_ttl == 0) {
@@ -177,7 +179,7 @@ void sr_handle_ip_packet(struct sr_instance *sr,
   struct sr_if* my_interface = sr_get_interface_given_ip(sr, dest);
   struct sr_rt* rt_entry;
   if (my_interface) {
-      /* Manejo ICMP echo request */
+    /* Manejo ICMP echo request */
     if (ip_packet->ip_p == ip_protocol_icmp) {
       int icmp_pos = sizeof (sr_ethernet_hdr_t) + sizeof(sr_ip_hdr_t);
       struct sr_icmp_hdr* icmp_packet = (sr_icmp_hdr_t*)(packet + icmp_pos);
@@ -269,23 +271,24 @@ void sr_handle_arp_packet(struct sr_instance *sr,
   struct sr_if* inter = sr_get_interface(sr, interface);
 
   uint8_t broadcast_mac[ETHER_ADDR_LEN] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
-  if (arp_packet->ar_op == arp_op_request && 
-    memcmp(arp_packet->ar_tha, broadcast_mac, ETHER_ADDR_LEN) == 0) { /* memcmp compara byte a byte no strings */
-  
-  /* Verifico si el ARP request es para una IP del router */
-  struct sr_if* target_interface = sr_get_interface_given_ip(sr, arp_packet->ar_tip);
-  if (target_interface) {
-    /* Es para nosotros, responder con ARP reply */
-    memcpy (arp_packet->ar_tha, arp_packet->ar_sha, ETHER_ADDR_LEN);
-    arp_packet->ar_tip = arp_packet->ar_sip;
-    arp_packet->ar_sip = target_interface->ip;
-    memcpy (arp_packet->ar_sha, target_interface->addr, ETHER_ADDR_LEN);
-    arp_packet->ar_op = arp_op_reply;
+  if (arp_packet->ar_op == arp_op_request &&  memcmp(arp_packet->ar_tha, broadcast_mac, ETHER_ADDR_LEN) == 0) {
+    
+    /* Verifico si el ARP request es para una IP del router */
+    struct sr_if* target_interface = sr_get_interface_given_ip(sr, arp_packet->ar_tip);
+    if (target_interface) {
+      /* Es para nosotros, responder con ARP reply */
+      memcpy (arp_packet->ar_tha, arp_packet->ar_sha, ETHER_ADDR_LEN);
+      arp_packet->ar_tip = arp_packet->ar_sip;
+      arp_packet->ar_sip = target_interface->ip;
+      memcpy (arp_packet->ar_sha, target_interface->addr, ETHER_ADDR_LEN);
+      arp_packet->ar_op = arp_op_reply;
 
-    sr_send_packet(sr, packet, len, target_interface->name);
-  } 
+      sr_send_packet(sr, packet, len, target_interface->name);
+    } 
+
     /* Si no es para nosotros, ignorar el ARP request */
   } else if (arp_packet->ar_op == arp_op_reply && memcmp(inter->addr, arp_packet->ar_tha, ETHER_ADDR_LEN) == 0) {
+
     /* ARP reply para nosotros, actualizar caché y enviar paquetes pendientes */
     struct sr_arpreq* req = sr_arpcache_insert(&sr->cache, arp_packet->ar_sha, arp_packet->ar_sip);
     if (req) {
