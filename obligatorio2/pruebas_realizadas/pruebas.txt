@@ -1,0 +1,6 @@
+1 Ping desde el cliente a una interfaz de vhost1(el mas cercano).
+2 Ping desde el cliente a una interfaz de vhost2.
+3 Ping desde el cliente a la interfaces de ambos servidores.
+4 Traceroute a server1 y varios de los hosts desde el cliente.
+5 Traceroute a server2 desde el cliente.
+6 Levantar servidores y ejecutar archivos de pruebas.

@@ -13,32 +13,20 @@
 #include "sr_if.h"
 #include "sr_protocol.h"
 #include "sr_utils.h"
-#include "sr_rt.h"
 
 /*
 	Envía una solicitud ARP.
 */
-
-struct sr_if* from_next_hop_to_interface (struct sr_instance *sr, uint32_t next_hop_ip) {
-  struct sr_rt* match = sr->routing_table;
-  while (match != NULL && match->gw.s_addr != next_hop_ip) {
-    match = match->next;
-  }
-  return sr_get_interface(sr, match->interface);
-}
-
-void sr_arp_request_send(struct sr_instance *sr, uint32_t ip) {
+void sr_arp_request_send(struct sr_instance *sr, uint32_t ip, struct sr_if* my_interface) {
   printf("$$$ -> Send ARP request.\n");
 
   int arpPacketLen = sizeof(sr_ethernet_hdr_t) + sizeof(sr_arp_hdr_t);
   uint8_t *arpPacket = malloc(arpPacketLen);
   sr_ethernet_hdr_t *ethHdr = (struct sr_ethernet_hdr *) arpPacket;
 
-  struct sr_if* my_interface = from_next_hop_to_interface(sr, ip);
-
   uint8_t broadcast_mac[ETHER_ADDR_LEN] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
-  memcpy(ethHdr->ether_dhost, broadcast_mac, ETHER_ADDR_LEN);
   memcpy(ethHdr->ether_shost, my_interface->addr, sizeof(uint8_t) * ETHER_ADDR_LEN);
+  memcpy(ethHdr->ether_dhost, broadcast_mac, ETHER_ADDR_LEN);
   ethHdr->ether_type = htons(ethertype_arp);
 
   sr_arp_hdr_t *arpHdr = (sr_arp_hdr_t *) (arpPacket + sizeof(sr_ethernet_hdr_t));
@@ -50,6 +38,10 @@ void sr_arp_request_send(struct sr_instance *sr, uint32_t ip) {
   memcpy(arpHdr->ar_sha, my_interface->addr, ETHER_ADDR_LEN);
   arpHdr->ar_sip = my_interface->ip;
   arpHdr->ar_tip = ip;
+
+  printf("ARP para hacer un pedido: ");
+  print_hdr_eth((uint8_t*)ethHdr);
+  print_hdr_arp((uint8_t*)arpHdr);
 
   sr_send_packet(sr, arpPacket, arpPacketLen, my_interface->name);
   free(arpPacket);
@@ -79,11 +71,11 @@ void sr_arp_request_send(struct sr_instance *sr, uint32_t ip) {
 void handle_arpreq(struct sr_instance *sr, struct sr_arpreq *req) {
   if (!req)
     return;
-  time_t current_time = time(NULL);
-  if (difftime(current_time, req->sent) >= 1.0) {
+  if (difftime(time(NULL), req->sent) >= 1.0) {
     if (req->times_sent < 5) {
-      sr_arp_request_send(sr, req->ip);
-      req->sent = current_time;
+      struct sr_if* interface = sr_get_interface(sr, req->packets->iface);
+      sr_arp_request_send(sr, req->ip, interface);
+      req->sent = time(NULL);
       req->times_sent++;
     } else {
       host_unreachable(sr, req);
