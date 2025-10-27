@@ -1,6 +1,8 @@
 #include <netinet/in.h>
+#include <stdint.h>
 #include <stdlib.h>
 #include <stdio.h>
+#include <sys/types.h>
 #include <time.h>
 #include <unistd.h>
 #include <pthread.h>
@@ -15,16 +17,40 @@
 /*
 	Envía una solicitud ARP.
 */
-void sr_arp_request_send(struct sr_instance *sr, uint32_t ip, char* iface) {
-
-
+void sr_arp_request_send(struct sr_instance *sr, uint32_t ip, struct sr_if* my_interface) {
   printf("$$$ -> Send ARP request.\n");
+
+  int arpPacketLen = sizeof(sr_ethernet_hdr_t) + sizeof(sr_arp_hdr_t);
+  uint8_t *arpPacket = malloc(arpPacketLen);
+  sr_ethernet_hdr_t *ethHdr = (struct sr_ethernet_hdr *) arpPacket;
+
+  uint8_t broadcast_mac[ETHER_ADDR_LEN] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
+  memcpy(ethHdr->ether_shost, my_interface->addr, sizeof(uint8_t) * ETHER_ADDR_LEN);
+  memcpy(ethHdr->ether_dhost, broadcast_mac, ETHER_ADDR_LEN);
+  ethHdr->ether_type = htons(ethertype_arp);
+
+  sr_arp_hdr_t *arpHdr = (sr_arp_hdr_t *) (arpPacket + sizeof(sr_ethernet_hdr_t));
+  arpHdr->ar_hrd = htons(1);
+  arpHdr->ar_pro = htons(2048);
+  arpHdr->ar_hln = 6;
+  arpHdr->ar_pln = 4;
+  arpHdr->ar_op = htons(arp_op_request);
+  memcpy(arpHdr->ar_sha, my_interface->addr, ETHER_ADDR_LEN);
+  arpHdr->ar_sip = my_interface->ip;
+  arpHdr->ar_tip = ip;
+
+  printf("ARP para hacer un pedido: ");
+  print_hdr_eth((uint8_t*)ethHdr);
+  print_hdr_arp((uint8_t*)arpHdr);
+
+  sr_send_packet(sr, arpPacket, arpPacketLen, my_interface->name);
+  free(arpPacket);
 
   /* 
   * COLOQUE AQÍ SU CÓDIGO
   * SUGERENCIAS: 
   * - Construya el cabezal Ethernet y agregue dirección de destino de broadcast
-  * - Envíe la solicitud ARP desde la interfaz pasada por parámetro, correspondiente a la conectada a la subred de la IP cuya MAC se desea conocer
+  * - Envíe la solicitud ARP desde la interfaz conectada a la subred de la IP cuya MAC se desea conocer
   * - Agregue la dirección de origen y el tipo de paquete
   * - Construya el cabezal ARP y envíe el paquete
   */
@@ -43,12 +69,31 @@ void sr_arp_request_send(struct sr_instance *sr, uint32_t ip, char* iface) {
   - no olvide actualizar los campos de la solicitud luego de reenviarla
 */
 void handle_arpreq(struct sr_instance *sr, struct sr_arpreq *req) {
-    /* COLOQUE SU CÓDIGO AQUÍ */
+  if (!req)
+    return;
+  if (difftime(time(NULL), req->sent) >= 1.0) {
+    if (req->times_sent < 5) {
+      struct sr_if* interface = sr_get_interface(sr, req->packets->iface);
+      sr_arp_request_send(sr, req->ip, interface);
+      req->sent = time(NULL);
+      req->times_sent++;
+    } else {
+      host_unreachable(sr, req);
+    }
+  }
 }
 
 /* Envía un mensaje ICMP host unreachable a los emisores de los paquetes esperando en la cola de una solicitud ARP */
 void host_unreachable(struct sr_instance *sr, struct sr_arpreq *req) {
-    /* COLOQUE SU CÓDIGO AQUÍ */
+  if (req) {
+    struct sr_packet* packets = req->packets;
+    while (packets) {
+      struct sr_ip_hdr* ip_packet_it = (sr_ip_hdr_t*)(packets->buf + sizeof(sr_ethernet_hdr_t));
+      sr_send_icmp_error_packet(3, 1, sr, ip_packet_it->ip_src, (uint8_t*)ip_packet_it);
+      packets = packets->next;
+    }
+    sr_arpreq_destroy(&sr->cache, req);
+  }
 }
 
 /* NO DEBERÍA TENER QUE MODIFICAR EL CÓDIGO A PARTIR DE AQUÍ. */
@@ -122,7 +167,6 @@ struct sr_arpreq *sr_arpcache_queuereq(struct sr_arpcache *cache,
         req = (struct sr_arpreq *) calloc(1, sizeof(struct sr_arpreq));
         req->ip = ip;
         req->next = cache->requests;
-        req->iface = iface;
         cache->requests = req;
     }
     
@@ -138,8 +182,8 @@ struct sr_arpreq *sr_arpcache_queuereq(struct sr_arpcache *cache,
         new_pkt->next = req->packets;
         req->packets = new_pkt;
     }
-    
-    pthread_mutex_unlock(&(cache->lock));
+  
+  pthread_mutex_unlock(&(cache->lock));
     
     return req;
 }
