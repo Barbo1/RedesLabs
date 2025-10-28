@@ -51,21 +51,18 @@ void sr_init(struct sr_instance* sr)
 
 struct sr_rt* find_longest_prefix_match (struct sr_instance* sr, uint32_t ip) {
   struct sr_rt* rt_entry = sr->routing_table, *best_entry;
-  uint32_t best, match;
+  uint32_t best = 0, mask, dest, art_ip = ntohl(ip);
 
   if (!rt_entry)
     return 0;
 
-  uint32_t art_ip = ntohl(ip);
-  best_entry = rt_entry;
-  best = ntohl(rt_entry->dest.s_addr) ^ (ntohl(rt_entry->mask.s_addr) & art_ip);
-  rt_entry = rt_entry->next;
   while (rt_entry) {
-    match = ntohl(rt_entry->dest.s_addr) ^ (ntohl(rt_entry->mask.s_addr) & art_ip);
-    if (match < best) {
-      best = match;
+    mask = ntohl(rt_entry->mask.s_addr);
+    dest = ntohl(rt_entry->dest.s_addr);
+    if ((art_ip & mask) == (dest & mask) && mask > best) {
+      best = mask;
       best_entry = rt_entry;
-    };
+    }
     rt_entry = rt_entry->next;
   }
   return best_entry;
@@ -180,8 +177,6 @@ void sr_handle_ip_packet(struct sr_instance *sr,
       struct sr_icmp_hdr* icmp_packet = (sr_icmp_hdr_t*)(packet + icmp_pos);
 
       if (icmp_packet->icmp_type == 8 && icmp_packet->icmp_code == 0) {
-        int icmp_size = len - icmp_pos;
-
         struct sr_rt* rt_entry = find_longest_prefix_match(sr, src);
         if (!rt_entry) {
           printf("error finding (1).");
@@ -201,12 +196,11 @@ void sr_handle_ip_packet(struct sr_instance *sr,
         
         /* Cambio la parte de ICMP contemplada por el cabezal. */
         struct sr_icmp_hdr* icmp_packet = (sr_icmp_hdr_t*)(packet + icmp_pos);
-        memcpy(icmp_packet, packet + icmp_pos, icmp_size);
         icmp_packet->icmp_type = 0;
         icmp_packet->icmp_sum = icmp_cksum (icmp_packet, len - icmp_pos);
 
         /* Envio el paquete. */
-        sr_send_packet(sr, packet, len, my_interface->name);
+        sr_send_packet(sr, packet, icmp_pos, my_interface->name);
       }
     }
     /* Manejo TCP o UDP. */
