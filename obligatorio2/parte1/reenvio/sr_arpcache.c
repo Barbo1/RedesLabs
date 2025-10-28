@@ -45,29 +45,10 @@ void sr_arp_request_send(struct sr_instance *sr, uint32_t ip, struct sr_if* my_i
 
   sr_send_packet(sr, arpPacket, arpPacketLen, my_interface->name);
   free(arpPacket);
-
-  /* 
-  * COLOQUE AQÍ SU CÓDIGO
-  * SUGERENCIAS: 
-  * - Construya el cabezal Ethernet y agregue dirección de destino de broadcast
-  * - Envíe la solicitud ARP desde la interfaz conectada a la subred de la IP cuya MAC se desea conocer
-  * - Agregue la dirección de origen y el tipo de paquete
-  * - Construya el cabezal ARP y envíe el paquete
-  */
   
   printf("$$$ -> Send ARP request processing complete.\n");
 }
 
-/*
-  Para cada solicitud enviada, se verifica si se debe enviar otra solicitud o descartar la solicitud ARP.
-  Si pasó más de un segundo desde que se envió la última solicitud, se envía otra, siempre y cuando no se haya enviado más de cinco veces.
-  Si se envió más de 5 veces, se debe descartar la solicitud ARP y enviar un ICMP host unreachable.
-  
-  SUGERENCIAS:
-  - la cola de solicitudes ARP se encuentra en sr->cache.requests, investigue la estructura y sus campos, junto a sus estructuras cuando corresponda
-  - investigue el uso de tipos de datos de tiempo y sus funciones asociadas en C
-  - no olvide actualizar los campos de la solicitud luego de reenviarla
-*/
 void handle_arpreq(struct sr_instance *sr, struct sr_arpreq *req) {
   if (!req)
     return;
