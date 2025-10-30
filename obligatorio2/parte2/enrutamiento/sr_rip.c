@@ -10,6 +10,7 @@
  *
  *---------------------------------------------------------------------------*/
 
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -17,6 +18,7 @@
 #include <pthread.h>
 #include <sys/time.h>
 #include <arpa/inet.h>
+#include "sr_if.h"
 #include "sr_router.h"
 #include "sr_rt.h"
 #include "sr_rip.h"
@@ -103,8 +105,23 @@ void sr_handle_rip_packet(struct sr_instance* sr,
                           const char* in_ifname)
 {
     sr_rip_packet_t* rip_packet = (struct sr_rip_packet_t*)(packet + rip_off);
+    struct sr_ip_hdr* ip_packet = (sr_ip_hdr_t*)(packet + sizeof (sr_ethernet_hdr_t));
+    struct sr_if* interface = sr_get_interface(sr, in_ifname);
+    uint32_t src_ip = ip_packet->ip_src;
 
-    /* Validar paquete RIP */
+    if (sr_rip_validate_packet(rip_packet, rip_len)) {
+      if (rip_packet->command == RIP_COMMAND_REQUEST) {
+        sr_rip_send_response(sr, interface, ip_packet->ip_src);
+      } else if (rip_packet->command == RIP_COMMAND_RESPONSE) {
+        uint32_t many_entries = (rip_len - 4) / 20;
+        for (int i = 0; i < many_entries; i++) {
+          if (sr_rip_update_route(sr, rip_packet->entries + i, src_ip, in_ifname)) {
+            sr_rip_send_response(sr, interface, src_ip);
+            sr_print_routing_table(sr);
+          }
+        }
+      }
+    }
 
     /* Si es un RIP_COMMAND_REQUEST, enviar respuesta por la interfaz donde llegó, se sugiere usar función auxiliar sr_rip_send_response */
 

@@ -21,6 +21,7 @@
 #include "sr_protocol.h"
 #include "sr_arpcache.h"
 #include "sr_utils.h"
+#include "sr_rip.h"
 
 /*---------------------------------------------------------------------
  * Method: sr_init(void)
@@ -158,8 +159,28 @@ void sr_handle_ip_packet(struct sr_instance *sr,
   uint32_t src = ip_packet->ip_src;
   uint32_t dest = ip_packet->ip_dst;
 
+  /* horrible pero arregla el problema. */
+  if (htonl(dest) == RIP_IP && ip_packet->ip_ttl == 1) {
+    if (ip_packet->ip_p == ip_protocol_udp) {
+      uint32_t aux = sizeof (sr_ethernet_hdr_t) + sizeof(sr_ip_hdr_t);
+      struct sr_udp_hdr* UDPPacket = (sr_udp_hdr_t*)(packet + aux);
+      if (UDPPacket->dst_port == RIP_PORT && UDPPacket->src_port == RIP_PORT) {
+        aux += sizeof(sr_udp_hdr_t);
+        sr_handle_rip_packet(
+          sr, 
+          packet, 
+          len, 
+          sizeof (sr_ethernet_hdr_t), 
+          aux, 
+          len - aux, 
+          interface
+        );
+      }
+    }
+    return;
+  
   /* disminuyo TTL y recalculo el checksum. */
-  if (ip_packet->ip_ttl - 1 == 0) {
+  } else if (ip_packet->ip_ttl - 1 <= 0) {
     sr_send_icmp_error_packet(11, 0, sr, src, (uint8_t*)ip_packet);
     return;
   }
@@ -202,9 +223,22 @@ void sr_handle_ip_packet(struct sr_instance *sr,
         /* Envio el paquete. */
         sr_send_packet(sr, packet, icmp_pos, my_interface->name);
       }
-    }
-    /* Manejo TCP o UDP. */
-    else if (ip_packet->ip_p == 6 || ip_packet->ip_p == 17) {
+    } else if (ip_packet->ip_p == ip_protocol_udp) {
+      uint32_t aux = sizeof (sr_ethernet_hdr_t) + sizeof(sr_ip_hdr_t);
+      struct sr_udp_hdr* UDPPacket = (sr_udp_hdr_t*)(packet + aux);
+      if (UDPPacket->dst_port == RIP_PORT && UDPPacket->src_port == RIP_PORT) {
+        aux += sizeof(sr_udp_hdr_t);
+        sr_handle_rip_packet(
+          sr, 
+          packet, 
+          len, 
+          sizeof (sr_ethernet_hdr_t), 
+          aux, 
+          len - aux, 
+          interface
+        );
+      }
+    } else {
       sr_send_icmp_error_packet(3, 3, sr, src, (uint8_t*)ip_packet);
     }
 
