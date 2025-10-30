@@ -250,33 +250,93 @@ void* sr_rip_periodic_advertisement(void* arg) {
 /* Chequea las rutas y marca las que expiran por timeout */
 void* sr_rip_timeout_manager(void* arg) {
     struct sr_instance* sr = arg;
+    /* - Se debe usar el mutex rip_metadata_lock para proteger el acceso concurrente
+        a la tabla de enrutamiento. */
+          
+    //- Bucle periódico que espera 1 segundo entre comprobaciones.
+    while(1){
+        sleep(1);
+        int changed = 0;
+        time_t now = time();
+
+        //- Recorre la tabla de enrutamiento 
+        pthread_mutex_lock(&rip_metadata_lock);
+        for (struct sr_rt* it = sr->routing_table; it; it = it->next) {
+            if (it->learned_from != htonl(0) && it->valid && difftime(now, it->last_updated) >= RIP_TIMEOUT_SEC) { // si aprendí de alguien
+                // Para cada ruta dinámica (aprendida de un vecino) que no se haya actualizado
+                // en el intervalo de timeout (RIP_TIMEOUT_SEC), marca la ruta como inválida, fija su métrica a
+                // INFINITY y anota el tiempo de inicio del proceso de garbage collection.
+                
+                it->valid = 0;
+                it->metric = INFINITY;                            /* Poisoned */
+                it->garbage_collection_time = now;          /* Comienza GC */
+                changed = 1;
+            }
+        }
+        pthread_mutex_unlock(&rip_metadata_lock);
     
-    /*  - Bucle periódico que espera 1 segundo entre comprobaciones.
-        - Recorre la tabla de enrutamiento y para cada ruta dinámica (aprendida de un vecino) que no se haya actualizado
-        en el intervalo de timeout (RIP_TIMEOUT_SEC), marca la ruta como inválida, fija su métrica a
-        INFINITY y anota el tiempo de inicio del proceso de garbage collection.
-        - Si se detectan cambios, se desencadena una actualización (triggered update)
-        hacia los vecinos y se actualiza/visualiza la tabla de enrutamiento.
-        - Imprimir la tabla si hay cambios
-        - Se debe usar el mutex rip_metadata_lock para proteger el acceso concurrente
-          a la tabla de enrutamiento.
-    */
+        //- Si se detectan cambios, se desencadena una actualización (triggered update)
+        // hacia los vecinos y se actualiza/visualiza la tabla de enrutamiento.
+        if (changed) {
+            
+            // Por letra: Debe enviar una triggered update cada vez que se agregue, modifique o
+            // elimine una ruta en su tabla de enrutamiento
+
+            /* Triggered update = enviar response por cada interfaz a RIP_IP con tabla completa */
+
+            for (struct sr_if* iface = sr->if_list; iface; iface != NULL = iface->next) {
+                sr_rip_send_response(sr, iface, RIP_IP);
+            }
+            //- Imprimir la tabla si hay cambios
+            print_routing_table(sr);
+        }
+    }
     return NULL;
 }
 
 /* Chequea las rutas marcadas como garbage collection y las elimina si expira el timer */
 void* sr_rip_garbage_collection_manager(void* arg) {
     struct sr_instance* sr = arg;
-    /*
-        - Bucle infinito que espera 1 segundo entre comprobaciones.
-        - Recorre la tabla de enrutamiento y elimina aquellas rutas que:
-            * estén marcadas como inválidas (valid == 0) y
-            * lleven más tiempo en garbage collection que RIP_GARBAGE_COLLECTION_SEC
-              (current_time >= garbage_collection_time + RIP_GARBAGE_COLLECTION_SEC).
-        - Si se detectan eliminaciones, se imprime la tabla.
-        - Se debe usar el mutex rip_metadata_lock para proteger el acceso concurrente
-          a la tabla de enrutamiento.
-    */
+    /* - Se debe usar el mutex rip_metadata_lock para proteger el acceso concurrente
+        a la tabla de enrutamiento.  */
+   while(1){
+        // - Bucle infinito que espera 1 segundo entre comprobaciones.
+        sleep(1);
+        int deleted = 0;
+        time_t now = time();
+
+        pthread_mutex_lock(&rip_metadata_lock);
+
+        struct sr_rt* it = sr->routing_table;
+        // - Recorre la tabla de enrutamiento
+        while (it != NULL) {
+            struct sr_rt* next = it->next;
+            // elimina aquellas rutas que:
+            // * estén marcadas como inválidas (valid == 0) y
+            // * lleven más tiempo en garbage collection que RIP_GARBAGE_COLLECTION_SEC
+            if (!it->valid && it->garbage_collection_time != 0) {
+                double in_gc = difftime(now, it->garbage_collection_time);
+                if (in_gc >= RIP_GARBAGE_COLLECTION_SEC) {                    
+                    sr_del_rt_entry(&sr->routing_table, it);
+                    deleted = 1;
+                }
+            }
+
+            it = next;
+        }
+        pthread_mutex_unlock(&rip_metadata_lock);
+
+        if (deleted) {
+            // Por letra: Debe enviar una triggered update cada vez que se agregue, modifique o
+            // elimine una ruta en su tabla de enrutamiento
+            for (struct sr_if* iface = sr->if_list; iface != NULL; iface = iface->next) {
+                sr_rip_send_response(sr, iface, RIP_IP);
+            }
+            
+            print_routing_table(sr);
+        }
+   }
+
     return NULL;
 }
 
