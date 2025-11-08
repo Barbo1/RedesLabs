@@ -135,57 +135,229 @@ void sr_handle_rip_packet(struct sr_instance* sr,
 void sr_rip_send_response(struct sr_instance* sr, struct sr_if* interface, uint32_t ipDst) {
     
     /* Reservar buffer para paquete completo con cabecera Ethernet */
+    unsigned int max_packet_len = sizeof(sr_ethernet_hdr_t) + 
+                                   sizeof(sr_ip_hdr_t) + 
+                                   sizeof(sr_udp_hdr_t) + 
+                                   sizeof(sr_rip_packet_t) + 
+                                   (25 * sizeof(sr_rip_entry_t));
+
+    uint8_t* packet = (uint8_t*)malloc(max_packet_len);
     
+    if (!packet) {
+        printf("Error de memoria");
+        return;
+    }
+
     /* Construir cabecera Ethernet */
+    sr_ethernet_hdr_t* eth_hdr = (sr_ethernet_hdr_t*)packet;
+    /* MAC origen la de la interfaz */
+    memcpy(eth_hdr->ether_shost, interface->addr, ETHER_ADDR_LEN);
+    
+    /* MAC destino: depende si es multicast o unicast */
+    if (ipDst == RIP_IP) {
+        /* Caso multicast: usar la MAC multicast de RIP directamente */
+        memcpy(eth_hdr->ether_dhost, rip_multicast_mac, ETHER_ADDR_LEN);
+    } else {
+        /* Caso unicast: necesitamos resolver ARP, lo resuelvo al enviar el paquete */
+        memset(eth_hdr->ether_dhost, 0, ETHER_ADDR_LEN);
+    }
+    
+    eth_hdr->ether_type = htons(ethertype_ip);
+
     
     /* Construir cabecera IP */
         /* RIP usa TTL=1 */
-    
+    sr_ip_hdr_t* ip_hdr = (sr_ip_hdr_t*)(packet + sizeof(sr_ethernet_hdr_t));
+    ip_hdr->ip_hl = sizeof (sr_ip_hdr_t) / 4;
+    ip_hdr->ip_v = 4;
+    ip_hdr->ip_tos = 0;
+    /* ip_hdr->ip_len lo calculo despues */
+    ip_hdr->ip_id = 0;
+    ip_hdr->ip_off = 0;
+    ip_hdr->ip_ttl = 1;
+    ip_hdr->ip_p = ip_protocol_udp;
+    ip_hdr->ip_src = interface->ip;
+    ip_hdr->ip_dst = ipDst; 
+    ip_hdr->ip_sum = 0;
+
     /* Construir cabecera UDP */
-    
+    sr_udp_hdr_t* udp_hdr = (sr_udp_hdr_t*)(packet + sizeof(sr_ethernet_hdr_t) + sizeof(sr_ip_hdr_t));
+    udp_hdr->src_port = htons(RIP_PORT);
+    udp_hdr->dst_port = htons(RIP_PORT);
+    udp_hdr->checksum = 0;
+    /* len y checksum se calculan despues */
+
     /* Construir paquete RIP con las entradas de la tabla */
         /* Armar encabezado RIP de la respuesta */
+    sr_rip_packet_t* rip_packet = (sr_rip_packet_t*)(packet + sizeof(sr_ethernet_hdr_t) + 
+                                                       sizeof(sr_ip_hdr_t) + 
+                                                       sizeof(sr_udp_hdr_t));
+    rip_packet->command = RIP_COMMAND_RESPONSE;
+    rip_packet->version = RIP_VERSION;
+    rip_packet->zero = 0;
+    
         /* Recorrer toda la tabla de enrutamiento  */
-        /* Considerar split horizon con poisoned reverse y rutas expiradas por timeout cuando corresponda */
-        /* Normalizar métrica a rango RIP (1..INFINITY) */
+        pthread_mutex_lock(&rip_metadata_lock);
+        int entry_count = 0; /* contador de entradas */
 
+        for (struct sr_rt* rt_entry = sr->routing_table;
+            rt_entry != NULL && entry_count < 25; /*25 entradas maximas por mensaje rip*/
+            rt_entry = rt_entry->next) {
+            
+                /* Considerar split horizon con poisoned reverse y rutas expiradas por timeout cuando corresponda */
+            uint32_t metric = rt_entry->metric;
+
+            #if SPLIT_HORIZON_ENABLED
+            /* si aprendimos esta ruta por la misma interfaz por la que vamos a enviar,
+            la envenenamos anunciandola con INFINITY */
+            if (strcmp(rt_entry->interface, interface->name) == 0) {
+                metric = INFINITY;
+            }
+            #endif
+        
+            /* Normalizar métrica a rango RIP (1..INFINITY) */
+            if (metric > INFINITY) metric = INFINITY;
+            if (metric == 0) metric = 1;
+
+            if (!rt_entry->valid) {
+                metric = INFINITY;
+            }
         /* Armar la entrada RIP:
            - family=2 (IPv4)
            - route_tag desde la ruta
            - ip/mask toman los valores de la tabla
            - next_hop: siempre 0.0.0.0 */
 
+           sr_rip_entry_t* rip_entry = &rip_packet->entries[entry_count];
+           rip_entry->family_identifier = htons(2);
+           rip_entry->route_tag = htons(rt_entry->route_tag);
+           rip_entry->ip = rt_entry->dest.s_addr;
+           rip_entry->mask = rt_entry->mask.s_addr;
+           rip_entry->next_hop = htonl(0);
+           rip_entry->metric = htonl(metric);
+
+           entry_count++;
+        }
+    
+        pthread_mutex_unlock(&rip_metadata_lock);
+
     /* Calcular longitudes del paquete */
+    unsigned int rip_len = sizeof(sr_rip_packet_t) + (entry_count * sizeof(sr_rip_entry_t));
+    unsigned int udp_len = sizeof(sr_udp_hdr_t) + rip_len;
+    unsigned int ip_len = sizeof(sr_ip_hdr_t) + udp_len;
+    unsigned int total_len = sizeof(sr_ethernet_hdr_t) + ip_len;
+
+    ip_hdr->ip_len = htons(ip_len);
+    udp_hdr->len = htons(udp_len);
     
     /* Calcular checksums */
+    ip_hdr->ip_sum = ip_cksum(ip_hdr, sizeof(sr_ip_hdr_t));
+    udp_hdr->checksum = udp_cksum(ip_hdr, udp_hdr, (uint8_t*)rip_packet);
     
     /* Enviar paquete */
+    if (ipDst != RIP_IP) {
+        struct sr_arpentry* arp_entry = sr_arpcache_lookup(&sr->cache, ipDst);
+        if (arp_entry) {
+            memcpy(eth_hdr->ether_dhost, arp_entry->mac, ETHER_ADDR_LEN);
+            sr_send_packet(sr, packet, total_len, interface->name);
+            free(arp_entry);
+        } else {
+            struct sr_arpreq* req = sr_arpcache_queuereq(&sr->cache, ipDst, packet, total_len, interface->name);
+            handle_arpreq(sr, req);
+            free(packet);
+            return;
+            }
+    } else {
+        sr_send_packet(sr, packet, total_len, interface->name);
+    }
+    
+    free(packet);
 }
 
 void* sr_rip_send_requests(void* arg) {
     sleep(3); // Esperar a que se inicialice todo
     struct sr_instance* sr = arg;
     struct sr_if* interface = sr->if_list;
-    // Se envia un Request RIP por cada interfaz:
+    /* Se envia un Request RIP por cada interfaz: */
+    for (interface = sr->if_list; 
+        interface != NULL; 
+        interface = interface->next) {
+
         /* Reservar buffer para paquete completo con cabecera Ethernet */
+        unsigned int packet_len = sizeof(sr_ethernet_hdr_t) + 
+                                   sizeof(sr_ip_hdr_t) + 
+                                   sizeof(sr_udp_hdr_t) + 
+                                   sizeof(sr_rip_packet_t) + 
+                                   sizeof(sr_rip_entry_t);
         
+        uint8_t* packet = (uint8_t*)malloc(packet_len);
+        if (!packet) {
+            printf("Error de memoria\n");
+            continue;
+        }
         /* Construir cabecera Ethernet */
+        sr_ethernet_hdr_t* eth_hdr = (sr_ethernet_hdr_t*)packet;
+        memcpy(eth_hdr->ether_shost, interface->addr, ETHER_ADDR_LEN);
+        memcpy(eth_hdr->ether_dhost, rip_multicast_mac, ETHER_ADDR_LEN);
+        eth_hdr->ether_type = htons(ethertype_ip);
         
         /* Construir cabecera IP */
             /* RIP usa TTL=1 */
-        
+        sr_ip_hdr_t* ip_hdr = (sr_ip_hdr_t*)(packet + sizeof(sr_ethernet_hdr_t));
+        ip_hdr->ip_hl = sizeof(sr_ip_hdr_t) / 4;
+        ip_hdr->ip_v = 4;
+        ip_hdr->ip_tos = 0;
+        ip_hdr->ip_id = 0;
+        ip_hdr->ip_off = 0;
+        ip_hdr->ip_ttl = 1; 
+        ip_hdr->ip_p = ip_protocol_udp;
+        ip_hdr->ip_src = interface->ip;
+        ip_hdr->ip_dst = RIP_IP;
+        ip_hdr->ip_sum = 0;
+
         /* Construir cabecera UDP */
+        sr_udp_hdr_t* udp_hdr = (sr_udp_hdr_t*)(packet + sizeof(sr_ethernet_hdr_t) + 
+                                                 sizeof(sr_ip_hdr_t));
+        udp_hdr->src_port = htons(RIP_PORT);
+        udp_hdr->dst_port = htons(RIP_PORT);
+        udp_hdr->checksum = 0;
         
         /* Construir paquete RIP */
+        sr_rip_packet_t* rip_packet = (sr_rip_packet_t*)(packet + 
+            sizeof(sr_ethernet_hdr_t) + 
+            sizeof(sr_ip_hdr_t) + 
+            sizeof(sr_udp_hdr_t));
+        rip_packet->command = RIP_COMMAND_REQUEST;
+        rip_packet->version = RIP_VERSION;
+        rip_packet->zero = 0;
 
         /* Entrada para solicitar la tabla de ruteo completa (ver RFC) */
-
+        sr_rip_entry_t* rip_entry = &rip_packet->entries[0];
+        rip_entry->family_identifier = htons(0);
+        rip_entry->route_tag = htons(0);
+        rip_entry->ip = htonl(0);
+        rip_entry->mask = htonl(0);
+        rip_entry->next_hop = htonl(0);
+        rip_entry->metric = htonl(INFINITY); 
+        
         /* Calcular longitudes del paquete */
+        unsigned int rip_len = sizeof(sr_rip_packet_t) + sizeof(sr_rip_entry_t);
+        unsigned int udp_len = sizeof(sr_udp_hdr_t) + rip_len;
+        unsigned int ip_len = sizeof(sr_ip_hdr_t) + udp_len;
+        unsigned int total_len = sizeof(sr_ethernet_hdr_t) + ip_len;
+        
+        ip_hdr->ip_len = htons(ip_len);
+        udp_hdr->len = htons(udp_len);
         
         /* Calcular checksums */
-        
+        ip_hdr->ip_sum = ip_cksum(ip_hdr, sizeof(sr_ip_hdr_t));
+        udp_hdr->checksum = udp_cksum(ip_hdr, udp_hdr, (uint8_t*)rip_packet);
+
         /* Enviar paquete */
-        
+        sr_send_packet(sr, packet, total_len, interface->name);
+        free(packet);
+    }
+
     return NULL;
 }
 
