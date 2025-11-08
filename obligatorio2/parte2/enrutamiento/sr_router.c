@@ -159,8 +159,12 @@ void sr_handle_ip_packet(struct sr_instance *sr,
   uint32_t src = ip_packet->ip_src;
   uint32_t dest = ip_packet->ip_dst;
 
+  struct sr_if* my_interface;
+  struct sr_rt* rt_entry;
+
   /* horrible pero arregla el problema. */
   if (htonl(dest) == RIP_IP && ip_packet->ip_ttl == 1) {
+    printf("1\n");
     if (ip_packet->ip_p == ip_protocol_udp) {
       uint32_t aux = sizeof (sr_ethernet_hdr_t) + sizeof(sr_ip_hdr_t);
       struct sr_udp_hdr* UDPPacket = (sr_udp_hdr_t*)(packet + aux);
@@ -178,19 +182,7 @@ void sr_handle_ip_packet(struct sr_instance *sr,
       }
     }
     return;
-  
-  /* disminuyo TTL y recalculo el checksum. */
-  } else if (ip_packet->ip_ttl - 1 <= 0) {
-    sr_send_icmp_error_packet(11, 0, sr, src, (uint8_t*)ip_packet);
-    return;
-  }
-  ip_packet->ip_ttl--;
-  ip_packet->ip_sum = ip_cksum(ip_packet, sizeof(sr_ip_hdr_t));
-
-  struct sr_if* my_interface;
-  struct sr_rt* rt_entry;
-
-  if ((my_interface = sr_get_interface_given_ip(sr, dest))) {
+  } else if ((my_interface = sr_get_interface_given_ip(sr, dest))) {
 
     /* Manejo ICMP echo request */
     if (ip_packet->ip_p == ip_protocol_icmp) {
@@ -243,6 +235,13 @@ void sr_handle_ip_packet(struct sr_instance *sr,
     }
 
   } else if ((rt_entry = find_longest_prefix_match(sr, dest))) {
+    ip_packet->ip_ttl--;
+    ip_packet->ip_sum = ip_cksum(ip_packet, sizeof(sr_ip_hdr_t));
+    if (ip_packet->ip_ttl <= 0) {
+      sr_send_icmp_error_packet(11, 0, sr, src, (uint8_t*)ip_packet);
+      return;
+    }
+
     uint32_t ip_next_hop = rt_entry->gw.s_addr;
     if (ip_next_hop == 0x00000000)
       ip_next_hop = dest;

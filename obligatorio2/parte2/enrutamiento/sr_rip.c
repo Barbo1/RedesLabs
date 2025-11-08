@@ -59,14 +59,134 @@ int sr_rip_validate_packet(sr_rip_packet_t* packet, unsigned int len) {
     return 1;
 }
 
+struct sr_rt* find_longest_prefix_match_2 (struct sr_instance* sr, uint32_t ip) {
+  struct sr_rt* rt_entry = sr->routing_table, *best_entry;
+  uint32_t best = 0, mask, dest, art_ip = ntohl(ip);
+
+  if (!rt_entry)
+    return 0;
+
+  while (rt_entry) {
+    mask = ntohl(rt_entry->mask.s_addr);
+    dest = ntohl(rt_entry->dest.s_addr);
+    if ((art_ip & mask) == (dest & mask) && mask > best) {
+      best = mask;
+      best_entry = rt_entry;
+    }
+    rt_entry = rt_entry->next;
+  }
+  return best_entry;
+}
+
 int sr_rip_update_route(struct sr_instance* sr,
                         const struct sr_rip_entry_t* rte,
                         uint32_t src_ip,
                         const char* in_ifname)
 {
+    pthread_mutex_lock(&rip_metadata_lock);
+
+    struct sr_if* interface = sr_get_interface(sr, in_ifname);
+
+    if (rte->metric >= INFINITY) {
+      for (struct sr_rt* rt_entry = sr->routing_table; rt_entry != NULL; rt_entry = rt_entry->next) {
+        if (rt_entry->learned_from == interface->ip) {
+          rt_entry->valid = 0;
+          rt_entry->metric = INFINITY;
+          rt_entry->garbage_collection_time = 0;
+        }
+      }
+    } else {
+      uint32_t new_metric = rte->metric + interface->cost;
+      if (new_metric < INFINITY) {
+        struct sr_rt* rt_entry = find_longest_prefix_match_2(sr, rte->ip & rte->mask);
+
+        /* Inseratr nueva entrada. */
+        if (!rt_entry) {
+          sr_add_rt_entry(
+            sr, 
+            (struct in_addr) {rte->ip & rte->mask}, 
+            (struct in_addr) {interface->ip}, 
+            (struct in_addr) {rte->mask}, 
+            in_ifname, 
+            new_metric, 
+            rte->route_tag, 
+            rte->next_hop, 
+            time(NULL), 
+            1, 
+            0
+          );
+          return 1;
+
+        /* Entrada es invalida. */
+        } else if (rt_entry->valid == 0) {
+          memcpy(rt_entry->interface, in_ifname, sr_IFACE_NAMELEN);
+          rt_entry->metric = new_metric;
+          rt_entry->gw = (struct in_addr) {interface->ip};
+          rt_entry->learned_from = interface->ip;
+          rt_entry->last_updated = time(NULL);
+          rt_entry->valid = 1;
+          return 1;
+       
+        /* Aprendida del mismo vecino */
+        } else if (rt_entry->learned_from == interface->ip) {
+          /* tengo dudas de l codigo de aca. */
+          rt_entry->metric = new_metric;
+          rt_entry->gw.s_addr = interface->ip;
+          rt_entry->last_updated = time(NULL);
+          return 1;
+        
+        } else {
+          /*  - Si la entrada viene de otro origen:
+           *      - Reemplaza la ruta si la nueva métrica es mejor.
+           *      - Si la métrica es igual y el next-hop coincide, refresca la entrada.
+           *      - En caso contrario (peor métrica o diferente camino), ignora la actualización.
+           * */
+          if (rt_entry->metric > new_metric) {
+            rt_entry->metric = new_metric;
+            rt_entry->gw.s_addr = interface->ip;
+            rt_entry->learned_from = interface->ip;
+            rt_entry->last_updated = time(NULL);
+            return 1;
+          } else if (rt_entry->metric == new_metric && rte->next_hop == rt_entry->gw.s_addr) {
+            rt_entry->last_updated = time(NULL);
+            return 1;
+          }
+        }
+      }
+    }
+    return 0;
+    /*
+typedef struct sr_rip_entry_t {
+    uint16_t family_identifier;
+    uint16_t route_tag;
+    uint32_t ip;
+    uint32_t mask;
+    uint32_t next_hop;
+    uint32_t metric;
+} __attribute__ ((packed)) sr_rip_entry_t;
+
+
+struct sr_rt
+{
+    struct in_addr dest;
+    struct in_addr gw;
+    struct in_addr mask;
+    char   interface[sr_IFACE_NAMELEN];
+    struct sr_rt* next;
+
+    uint8_t metric;
+    uint16_t route_tag;
+    uint32_t learned_from;
+    time_t last_updated;
+    uint8_t valid;
+    time_t garbage_collection_time;
+};
+     */
+
     /*
      * Procesa una entrada RIP recibida por una interfaz.
      *
+      
 
      *  - Si la métrica anunciada es >= 16:
      *      - Si ya existe una ruta coincidente aprendida desde el mismo vecino, marca la ruta
@@ -114,10 +234,17 @@ void sr_handle_rip_packet(struct sr_instance* sr,
         sr_rip_send_response(sr, interface, ip_packet->ip_src);
       } else if (rip_packet->command == RIP_COMMAND_RESPONSE) {
         uint32_t many_entries = (rip_len - 4) / 20;
+        uint32_t many_modified = 0;
+        uint32_t many_invalid = 0;
         for (int i = 0; i < many_entries; i++) {
           if (sr_rip_update_route(sr, rip_packet->entries + i, src_ip, in_ifname)) {
-            sr_rip_send_response(sr, interface, src_ip);
             sr_print_routing_table(sr);
+          }
+        }
+        /* envio una triggered update si se realiza un cambio en la tabla. */
+        if (many_modified) {
+          for (struct sr_if* inter = sr->if_list; inter != NULL; inter = inter->next) {
+            sr_rip_send_response(sr, inter, inter->ip);
           }
         }
       }
@@ -257,7 +384,7 @@ void* sr_rip_timeout_manager(void* arg) {
     while(1){
         sleep(1);
         int changed = 0;
-        time_t now = time();
+        time_t now = time(NULL);
 
         //- Recorre la tabla de enrutamiento 
         pthread_mutex_lock(&rip_metadata_lock);

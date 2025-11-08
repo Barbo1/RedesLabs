@@ -162,7 +162,6 @@ void sr_handle_ip_packet(struct sr_instance *sr,
   struct sr_rt* rt_entry;
 
   if ((my_interface = sr_get_interface_given_ip(sr, dest))) {
-
     /* Manejo ICMP echo request */
     if (ip_packet->ip_p == ip_protocol_icmp) {
       int icmp_pos = sizeof (sr_ethernet_hdr_t) + sizeof(sr_ip_hdr_t);
@@ -189,7 +188,7 @@ void sr_handle_ip_packet(struct sr_instance *sr,
         /* Cambio la parte de ICMP contemplada por el cabezal. */
         struct sr_icmp_hdr* icmp_packet = (sr_icmp_hdr_t*)(packet + icmp_pos);
         icmp_packet->icmp_type = 0;
-        icmp_packet->icmp_sum = icmp_cksum (icmp_packet, sizeof(sr_icmp_hdr_t));
+        icmp_packet->icmp_sum = icmp_cksum (icmp_packet, len - icmp_pos);
 
         /* Envio el paquete. */
         sr_send_packet(sr, packet, icmp_pos, my_interface->name);
