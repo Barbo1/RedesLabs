@@ -1,0 +1,27 @@
+
+-> Mensaje de warning por paquetes "shoreter than UDP len".
+
+-> Perdidas de paqutes por traceroute a un servidor.
+
+-> Ping hacia una interfaz de un host en el medio de la red muestra 2 veces el nodo final como 
+  partes distinas del camino. Con esto pasan dos cosas: 
+      1- si quito el (-1) de la evaluacion en el TTL, no tiene sentido y hace que no aparezca 
+        el primer hop.
+      2- todo lo demas funciona bien.
+
+-----------------------------------------------------------------------------------------------------
+
+-> It is also worth checking to see whether the response is from one of the router's own addresses. 
+  Interfaces on broadcast networks may receive copies of their own broadcasts/multicasts immediately.  
+  If a router processes its own output as new input, confusion is likely so such datagrams must be 
+  ignored.
+
+-> cuando se actualiza la rooting table por solamente una entrada del paquete RIP, se debe enviar
+  inmediatamente una triggered update? El estandar dice:
+    - Signal the output process to trigger an update (see section 3.8.1)
+
+-> que significa route_tag?
+
+-> podemos decidir no implementar los casos de mas de 25 entradas dentro del paquete RIP?
+
+-> tenemos que considerar la autenticacion?

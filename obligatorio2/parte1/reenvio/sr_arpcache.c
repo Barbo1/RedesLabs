@@ -17,18 +17,16 @@
 /*
 	Envía una solicitud ARP.
 */
-void sr_arp_request_send(struct sr_instance *sr, uint32_t ip) {
+void sr_arp_request_send(struct sr_instance *sr, uint32_t ip, struct sr_if* my_interface) {
   printf("$$$ -> Send ARP request.\n");
 
   int arpPacketLen = sizeof(sr_ethernet_hdr_t) + sizeof(sr_arp_hdr_t);
   uint8_t *arpPacket = malloc(arpPacketLen);
   sr_ethernet_hdr_t *ethHdr = (struct sr_ethernet_hdr *) arpPacket;
 
-  struct sr_if* my_interface = sr_get_interface_given_ip(sr, ip);
-
   uint8_t broadcast_mac[ETHER_ADDR_LEN] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
-  memcpy(ethHdr->ether_dhost, broadcast_mac, ETHER_ADDR_LEN);
   memcpy(ethHdr->ether_shost, my_interface->addr, sizeof(uint8_t) * ETHER_ADDR_LEN);
+  memcpy(ethHdr->ether_dhost, broadcast_mac, ETHER_ADDR_LEN);
   ethHdr->ether_type = htons(ethertype_arp);
 
   sr_arp_hdr_t *arpHdr = (sr_arp_hdr_t *) (arpPacket + sizeof(sr_ethernet_hdr_t));
@@ -41,50 +39,29 @@ void sr_arp_request_send(struct sr_instance *sr, uint32_t ip) {
   arpHdr->ar_sip = my_interface->ip;
   arpHdr->ar_tip = ip;
 
+  printf("ARP para hacer un pedido: ");
+  print_hdr_eth((uint8_t*)ethHdr);
+  print_hdr_arp((uint8_t*)arpHdr);
+
   sr_send_packet(sr, arpPacket, arpPacketLen, my_interface->name);
   free(arpPacket);
-
-  /* 
-  * COLOQUE AQÍ SU CÓDIGO
-  * SUGERENCIAS: 
-  * - Construya el cabezal Ethernet y agregue dirección de destino de broadcast
-  * - Envíe la solicitud ARP desde la interfaz conectada a la subred de la IP cuya MAC se desea conocer
-  * - Agregue la dirección de origen y el tipo de paquete
-  * - Construya el cabezal ARP y envíe el paquete
-  */
   
   printf("$$$ -> Send ARP request processing complete.\n");
 }
 
-/*
-  Para cada solicitud enviada, se verifica si se debe enviar otra solicitud o descartar la solicitud ARP.
-  Si pasó más de un segundo desde que se envió la última solicitud, se envía otra, siempre y cuando no se haya enviado más de cinco veces.
-  Si se envió más de 5 veces, se debe descartar la solicitud ARP y enviar un ICMP host unreachable.
-  
-  SUGERENCIAS:
-  - la cola de solicitudes ARP se encuentra en sr->cache.requests, investigue la estructura y sus campos, junto a sus estructuras cuando corresponda
-  - investigue el uso de tipos de datos de tiempo y sus funciones asociadas en C
-  - no olvide actualizar los campos de la solicitud luego de reenviarla
-*/
 void handle_arpreq(struct sr_instance *sr, struct sr_arpreq *req) {
-    if (!req) {
-        return;
+  if (!req)
+    return;
+  if (difftime(time(NULL), req->sent) >= 1.0) {
+    if (req->times_sent < 5) {
+      struct sr_if* interface = sr_get_interface(sr, req->packets->iface);
+      sr_arp_request_send(sr, req->ip, interface);
+      req->sent = time(NULL);
+      req->times_sent++;
+    } else {
+      host_unreachable(sr, req);
     }
-    time_t current_time = time(NULL);
-    /* Verifico si paso mas de 1 segundo desde el ultimo envio */
-    if (difftime(current_time, req->sent) >= 1.0) {
-        /* Verifico si se han enviado menos de 5 solicitudes */
-        if (req->times_sent < 5) {
-            /* Envio nueva solicitud ARP */
-            sr_arp_request_send(sr, req->ip);
-            req->sent = current_time;
-            req->times_sent++;
-        } else {
-            /* Se han enviado 5 solicitudes sin respuesta, envio ICMP host unreachable y descarto la solicitud */
-            host_unreachable(sr, req);
-        }
-    }
-
+  }
 }
 
 /* Envía un mensaje ICMP host unreachable a los emisores de los paquetes esperando en la cola de una solicitud ARP */
