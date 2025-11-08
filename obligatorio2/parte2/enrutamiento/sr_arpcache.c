@@ -148,6 +148,7 @@ struct sr_arpreq *sr_arpcache_queuereq(struct sr_arpcache *cache,
         req = (struct sr_arpreq *) calloc(1, sizeof(struct sr_arpreq));
         req->ip = ip;
         req->next = cache->requests;
+        req->iface = iface;
         cache->requests = req;
     }
     
@@ -163,8 +164,8 @@ struct sr_arpreq *sr_arpcache_queuereq(struct sr_arpcache *cache,
         new_pkt->next = req->packets;
         req->packets = new_pkt;
     }
-  
-  pthread_mutex_unlock(&(cache->lock));
+    
+    pthread_mutex_unlock(&(cache->lock));
     
     return req;
 }
@@ -318,4 +319,5 @@ void *sr_arpcache_timeout(void *sr_ptr) {
     
     return NULL;
 }
+
 
