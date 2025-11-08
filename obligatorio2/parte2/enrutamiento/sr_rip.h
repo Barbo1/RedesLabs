@@ -22,6 +22,7 @@
 #define RIP_ADVERT_INTERVAL_SEC 10
 #define RIP_TIMEOUT_SEC 60
 #define RIP_GARBAGE_COLLECTION_SEC 40
+#define SPLIT_HORIZON_ENABLED 1
 
 struct sr_rip_subsys
 {
