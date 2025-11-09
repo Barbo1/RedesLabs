@@ -191,7 +191,7 @@ void sr_handle_ip_packet(struct sr_instance *sr,
         icmp_packet->icmp_sum = icmp_cksum (icmp_packet, len - icmp_pos);
 
         /* Envio el paquete. */
-        sr_send_packet(sr, packet, icmp_pos, my_interface->name);
+        sr_send_packet(sr, packet, len, my_interface->name);
       }
     }
     /* Manejo TCP o UDP. */
