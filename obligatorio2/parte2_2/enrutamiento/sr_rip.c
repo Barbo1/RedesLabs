@@ -92,9 +92,19 @@ int sr_rip_update_route(struct sr_instance* sr,
      *  -  0: no se realizaron cambios.
      *
      */
-    pthread_mutex_lock(&rip_metadata_lock);
 
-    struct sr_if* interface = sr_get_interface(sr, in_ifname);
+    if (rte->family_identifier != htons(2) || rte->next_hop != htonl(0)) {
+      return -1;
+    }
+
+    struct sr_if* interface = sr_get_interface(sr, in_ifname); 
+    
+    if (!interface) {
+      return -1;
+    }
+    
+    pthread_mutex_lock(&rip_metadata_lock);
+    
     uint32_t new_metric = ntohl(rte->metric) + interface->cost;
 
     struct sr_rt* rt_entry = sr->routing_table;
@@ -117,14 +127,20 @@ int sr_rip_update_route(struct sr_instance* sr,
     }
 
     if (ntohl(rte->metric) >= INFINITY) {
-      if (rt_entry->learned_from == interface->ip) {
+      if (rt_entry && rt_entry->learned_from == interface->ip) {
         printf("1'\n");
         rt_entry->valid = 0;
         rt_entry->metric = INFINITY;
         rt_entry->garbage_collection_time = time(NULL);
-        return_value = -1;
+        return_value = 1;
       } 
-    } else if (!rt_entry) {
+    } 
+    else if (new_metric >= INFINITY) {
+      pthread_mutex_unlock(&rip_metadata_lock);
+      return 0;
+    }
+    
+    else if (!rt_entry) {
       sr_add_rt_entry(
         sr, 
         (struct in_addr) {rte->ip & rte->mask}, 
@@ -133,7 +149,7 @@ int sr_rip_update_route(struct sr_instance* sr,
         in_ifname, 
         new_metric, 
         ntohl(rte->route_tag), 
-        ntohl(rte->next_hop), 
+        interface->ip, 
         time(NULL), 
         1, 
         0
@@ -189,7 +205,7 @@ void sr_handle_rip_packet(struct sr_instance* sr,
                           const char* in_ifname)
 {
     sr_rip_packet_t* rip_packet = (struct sr_rip_packet_t*)(packet + rip_off);
-    struct sr_ip_hdr* ip_packet = (sr_ip_hdr_t*)(packet + sizeof (sr_ethernet_hdr_t));
+    struct sr_ip_hdr* ip_packet = (sr_ip_hdr_t*)(packet + ip_off);
     struct sr_if* interface = sr_get_interface(sr, in_ifname);
     uint32_t src_ip = ip_packet->ip_src;
 
@@ -197,24 +213,21 @@ void sr_handle_rip_packet(struct sr_instance* sr,
       if (rip_packet->command == RIP_COMMAND_REQUEST) {
         sr_rip_send_response(sr, interface, ip_packet->ip_src);
       } else if (rip_packet->command == RIP_COMMAND_RESPONSE) {
-        uint32_t many_entries = (rip_len - 4) / 20;
+        uint32_t many_entries = (rip_len - sizeof(sr_rip_packet_t)) / sizeof(sr_rip_entry_t);
         uint32_t many_modified = 0;
-        uint32_t many_invalid = 0;
         for (int i = 0; i < many_entries; i++) {
           int j = sr_rip_update_route(sr, rip_packet->entries + i, src_ip, in_ifname);
-          if (j == 1) {
-            many_modified++;
-          } else if (j == -1) {
-            many_invalid++;
-          }
+          many_modified += (j == 1);
         }
 
         /* envio una triggered update si se realiza un cambio en la tabla. */
-        if (many_modified) {
-          for (struct sr_if* inter = sr->if_list; inter != NULL; inter = inter->next) {
-            sr_rip_send_response(sr, inter, ip_packet->ip_src);
+        #if TRIGGERED_UPDATE_ENABLED
+          if (many_modified) {
+            for (struct sr_if* inter = sr->if_list; inter != NULL; inter = inter->next) {
+              sr_rip_send_response(sr, inter, htonl(RIP_IP));
+            }
           }
-        }
+        #endif
 
         print_routing_table(sr);
       }
@@ -515,7 +528,7 @@ void* sr_rip_periodic_advertisement(void* arg) {
         Esto implementa el envío periódico de rutas (anuncios no solicitados) en RIPv2.
     */
 
-    sleep (RIP_ADVERT_INTERVAL_SEC);
+    sleep(RIP_ADVERT_INTERVAL_SEC);
     while (1) {
       for (struct sr_if* inter = sr->if_list; inter != NULL; inter = inter->next)
         sr_rip_send_response(sr, inter, htonl(RIP_IP));
