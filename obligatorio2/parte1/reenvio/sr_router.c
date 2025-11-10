@@ -176,23 +176,32 @@ void sr_handle_ip_packet(struct sr_instance *sr,
         }
         my_interface = sr_get_interface(sr, rt_entry->interface);
 
+        uint32_t ip_next_hop = rt_entry->gw.s_addr;
+        if (ip_next_hop == 0x00000000)
+          ip_next_hop = src;
+
         /* Cambio la parte de Ethernet. */
         memcpy(eth_packet->ether_shost, my_interface->addr, ETHER_ADDR_LEN);
-        memcpy(eth_packet->ether_dhost, srcAddr, ETHER_ADDR_LEN);
 
         /* Cambio la parte de IP. */
-        ip_packet->ip_src = dest;
+        ip_packet->ip_src = my_interface->ip;
         ip_packet->ip_dst = src;
         ip_packet->ip_ttl = 32;
         ip_packet->ip_sum = ip_cksum(ip_packet, sizeof(sr_ip_hdr_t));
         
         /* Cambio la parte de ICMP contemplada por el cabezal. */
-        struct sr_icmp_hdr* icmp_packet = (sr_icmp_hdr_t*)(packet + icmp_pos);
         icmp_packet->icmp_type = 0;
         icmp_packet->icmp_sum = icmp_cksum (icmp_packet, len - icmp_pos);
 
         /* Envio el paquete. */
-        sr_send_packet(sr, packet, len, my_interface->name);
+        struct sr_arpentry* entry = sr_arpcache_lookup(&sr->cache, ip_next_hop);
+        if (entry) {
+          memcpy(eth_packet->ether_dhost, entry->mac, ETHER_ADDR_LEN);
+          sr_send_packet(sr, packet, len, rt_entry->interface);
+        } else {
+          struct sr_arpreq* req = sr_arpcache_queuereq(&sr->cache, ip_next_hop, packet, len, rt_entry->interface);
+          handle_arpreq(sr, req);
+        }
       }
     }
     /* Manejo TCP o UDP. */
