@@ -50,11 +50,12 @@ void sr_init(struct sr_instance* sr)
 } /* -- sr_init -- */
 
 struct sr_rt* find_longest_prefix_match (struct sr_instance* sr, uint32_t ip) {
-  struct sr_rt* rt_entry = sr->routing_table, *best_entry;
+  struct sr_rt* rt_entry = sr->routing_table;
+  struct sr_rt* best_entry = NULL;
   uint32_t best = 0, mask, dest, art_ip = ntohl(ip);
 
   if (!rt_entry)
-    return 0;
+    return NULL;
 
   while (rt_entry) {
     mask = ntohl(rt_entry->mask.s_addr);
