@@ -1,8 +1,6 @@
 #include <netinet/in.h>
-#include <stdint.h>
 #include <stdlib.h>
 #include <stdio.h>
-#include <sys/types.h>
 #include <time.h>
 #include <unistd.h>
 #include <pthread.h>
@@ -319,5 +317,4 @@ void *sr_arpcache_timeout(void *sr_ptr) {
     
     return NULL;
 }
-
 

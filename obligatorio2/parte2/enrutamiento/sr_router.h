@@ -15,13 +15,20 @@
 
 #include "sr_protocol.h"
 #include "sr_arpcache.h"
+#include "sr_rip.h"
 
 /* we dont like this debug , but what to do for varargs ? */
 #ifdef _DEBUG_
-#define Debug(x, args...) printf(x, ## args)
+#define DEBUG_ENABLED 1 // si se pone en 0 desaparece la salida de la función Debug
+
+#if DEBUG_ENABLED
+#define Debug(fmt, ...) printf(fmt "\n", ##__VA_ARGS__)
+#else
+#define Debug(fmt, ...) ((void)0)
+#endif
 #define DebugMAC(x) \
-  do { int ivyl; for(ivyl=0; ivyl<5; ivyl++) printf("%02x:", \
-  (unsigned char)(x[ivyl])); printf("%02x",(unsigned char)(x[5])); } while (0)
+do { int ivyl; for(ivyl=0; ivyl<5; ivyl++) printf("%02x:", \
+(unsigned char)(x[ivyl])); printf("%02x",(unsigned char)(x[5])); } while (0)
 #else
 #define Debug(x, args...) do{}while(0)
 #define DebugMAC(x) do{}while(0)
@@ -45,13 +52,14 @@ struct sr_instance
 {
     int  sockfd;   /* socket to server */
     char user[32]; /* user name */
-    char host[32]; /* host name */ 
+    char host[32]; /* host name */
     char template[30]; /* template name if any */
     unsigned short topo_id;
     struct sockaddr_in sr_addr; /* address to server */
     struct sr_if* if_list; /* list of interfaces */
     struct sr_rt* routing_table; /* routing table */
     struct sr_arpcache cache;   /* ARP cache */
+    struct sr_rip_subsys rip_subsys; /* Subsistema RIP */
     pthread_attr_t attr;
     FILE* logfile;
 };
