@@ -64,10 +64,6 @@ int sr_rip_update_route(struct sr_instance* sr,
                         const char* in_ifname)
 {
     /*
-     * Procesa una entrada RIP recibida por una interfaz.
-     *
-      
-
      *  - Si la métrica anunciada es >= 16:
      *      - Si ya existe una ruta coincidente aprendida desde el mismo vecino, marca la ruta
      *        como inválida, pone métrica a INFINITY y fija el tiempo de garbage collection.
@@ -98,32 +94,18 @@ int sr_rip_update_route(struct sr_instance* sr,
     }
 
     struct sr_if* interface = sr_get_interface(sr, in_ifname); 
-    
     if (!interface) {
       return -1;
     }
-    
-    pthread_mutex_lock(&rip_metadata_lock);
-    
+
     uint32_t new_metric = ntohl(rte->metric) + interface->cost;
+    int return_value;
+
+    pthread_mutex_lock(&rip_metadata_lock);
 
     struct sr_rt* rt_entry = sr->routing_table;
     while (rt_entry != NULL && (rt_entry->dest.s_addr != (rte->ip & rte->mask) || rt_entry->mask.s_addr != rte->mask)) {
       rt_entry = rt_entry->next;
-    }
-
-    int return_value;
-
-    printf("metrica = %d.\n", ntohl(rte->metric));
-    if (rt_entry) {
-      printf("encontro entrada:\n");
-      print_addr_ip(rt_entry->dest);
-      print_addr_ip((struct in_addr){rte->ip});
-      printf("%d\n", rt_entry->dest.s_addr == (rte->ip & rte->mask));
-      printf("validez entrada = %d\n", rt_entry->valid);
-    } else {
-      printf("NO encontro entrada.\n");
-      print_addr_ip((struct in_addr){rte->ip});
     }
 
     if (ntohl(rte->metric) >= INFINITY) {
@@ -132,7 +114,6 @@ int sr_rip_update_route(struct sr_instance* sr,
         rt_entry->metric = INFINITY;
         rt_entry->garbage_collection_time = time(NULL);
         return_value = 1;
-        printf("1.\n");
       } else return_value = 0;
 
     } else if (new_metric >= INFINITY) {
@@ -153,7 +134,6 @@ int sr_rip_update_route(struct sr_instance* sr,
         0
       );
       return_value = 1;
-      printf("2.\n");
 
       /* Entrada es invalida. */
     } else if (rt_entry->valid == 0) {
@@ -164,7 +144,6 @@ int sr_rip_update_route(struct sr_instance* sr,
       rt_entry->last_updated = time(NULL);
       rt_entry->valid = 1;
       return_value = 1;
-      printf("3.\n");
 
       /* Aprendida del mismo vecino */
     } else if (rt_entry->learned_from == interface->ip) {
@@ -180,7 +159,6 @@ int sr_rip_update_route(struct sr_instance* sr,
         rt_entry->gw.s_addr = src_ip;
         return_value = 1;
       }
-      printf("4.\n");
 
     } else {
       if (rt_entry->metric > new_metric) {
@@ -190,12 +168,10 @@ int sr_rip_update_route(struct sr_instance* sr,
         rt_entry->last_updated = time(NULL);
         memcpy(rt_entry->interface, interface->name, sr_IFACE_NAMELEN);
         return_value = 1;
-        printf("5.\n");
 
       } else if (rt_entry->metric == new_metric && src_ip == rt_entry->gw.s_addr) {
         rt_entry->last_updated = time(NULL);
         return_value = 0;
-        printf("6.\n");
 
       } else return_value = 0;
     }
@@ -280,9 +256,7 @@ void sr_rip_send_response(struct sr_instance* sr, struct sr_if* interface, uint3
     
     eth_hdr->ether_type = htons(ethertype_ip);
 
-    
     /* Construir cabecera IP */
-        /* RIP usa TTL=1 */
     sr_ip_hdr_t* ip_hdr = (sr_ip_hdr_t*)(packet + sizeof(sr_ethernet_hdr_t));
     ip_hdr->ip_hl = sizeof (sr_ip_hdr_t) / 4;
     ip_hdr->ip_v = 4;
@@ -300,7 +274,6 @@ void sr_rip_send_response(struct sr_instance* sr, struct sr_if* interface, uint3
     udp_hdr->src_port = htons(RIP_PORT);
     udp_hdr->dst_port = htons(RIP_PORT);
     udp_hdr->checksum = 0;
-    /* len y checksum se calculan despues */
 
     /* Construir paquete RIP con las entradas de la tabla */
     sr_rip_packet_t* rip_packet = (sr_rip_packet_t*)(packet + sizeof(sr_ethernet_hdr_t) + 
@@ -315,18 +288,18 @@ void sr_rip_send_response(struct sr_instance* sr, struct sr_if* interface, uint3
         int entry_count = 0; /* contador de entradas */
 
         for (struct sr_rt* rt_entry = sr->routing_table;
-            rt_entry != NULL && entry_count < 25; /*25 entradas maximas por mensaje rip*/
+            rt_entry != NULL && entry_count < 25;
             rt_entry = rt_entry->next) {
             
             /* Considerar split horizon con poisoned reverse y rutas expiradas por timeout cuando corresponda */
             uint32_t metric = rt_entry->metric;
 
             #if SPLIT_HORIZON_ENABLED
-            /* si aprendimos esta ruta por la misma interfaz por la que vamos a enviar,
-            la envenenamos anunciandola con INFINITY */
-            if (strcmp(rt_entry->interface, interface->name) == 0) {
-                metric = INFINITY;
-            }
+              /* si aprendimos esta ruta por la misma interfaz por la que vamos a enviar,
+              la envenenamos anunciandola con INFINITY */
+              if (strcmp(rt_entry->interface, interface->name) == 0) {
+                  metric = INFINITY;
+              }
             #endif
         
             /* Normalizar métrica a rango RIP (1..INFINITY) */
@@ -375,7 +348,7 @@ void sr_rip_send_response(struct sr_instance* sr, struct sr_if* interface, uint3
             handle_arpreq(sr, req);
             free(packet);
             return;
-            }
+        }
     } else {
         sr_send_packet(sr, packet, total_len, interface->name);
     }
@@ -387,6 +360,7 @@ void* sr_rip_send_requests(void* arg) {
     sleep(3); // Esperar a que se inicialice todo
     struct sr_instance* sr = arg;
     struct sr_if* interface = sr->if_list;
+
     /* Se envia un Request RIP por cada interfaz: */
     for (interface = sr->if_list; 
         interface != NULL; 
@@ -411,7 +385,6 @@ void* sr_rip_send_requests(void* arg) {
         eth_hdr->ether_type = htons(ethertype_ip);
         
         /* Construir cabecera IP */
-            /* RIP usa TTL=1 */
         sr_ip_hdr_t* ip_hdr = (sr_ip_hdr_t*)(packet + sizeof(sr_ethernet_hdr_t));
         ip_hdr->ip_hl = sizeof(sr_ip_hdr_t) / 4;
         ip_hdr->ip_v = 4;
@@ -556,7 +529,7 @@ void* sr_rip_timeout_manager(void* arg) {
                 
                 it->valid = 0;
                 it->metric = INFINITY;                            /* Poisoned */
-                it->garbage_collection_time = time(NULL);          /* Comienza GC */
+                it->garbage_collection_time = time(NULL);
                 changed = 1;
             }
         }
@@ -588,12 +561,8 @@ void* sr_rip_garbage_collection_manager(void* arg) {
         pthread_mutex_lock(&rip_metadata_lock);
 
         struct sr_rt* it = sr->routing_table;
-        // - Recorre la tabla de enrutamiento
         while (it != NULL) {
             struct sr_rt* next = it->next;
-            // elimina aquellas rutas que:
-            // * estén marcadas como inválidas (valid == 0) y
-            // * lleven más tiempo en garbage collection que RIP_GARBAGE_COLLECTION_SEC
             double in_gc = difftime(now, it->garbage_collection_time);
             if (!it->valid && in_gc >= RIP_GARBAGE_COLLECTION_SEC) {
               sr_del_rt_entry(&sr->routing_table, it);
@@ -605,8 +574,6 @@ void* sr_rip_garbage_collection_manager(void* arg) {
         pthread_mutex_unlock(&rip_metadata_lock);
 
         if (deleted) {
-            // Por letra: Debe enviar una triggered update cada vez que se agregue, modifique o
-            // elimine una ruta en su tabla de enrutamiento
             for (struct sr_if* iface = sr->if_list; iface != NULL; iface = iface->next) {
                 sr_rip_send_response(sr, iface, htonl(RIP_IP));
             }

@@ -224,7 +224,10 @@ void sr_handle_ip_packet(struct sr_instance *sr,
           handle_arpreq(sr, req);
         }
       }
-    } else if (ip_packet->ip_p == ip_protocol_udp) {
+      return;
+    }
+
+    if (ip_packet->ip_p == ip_protocol_udp) {
       uint32_t aux = sizeof (sr_ethernet_hdr_t) + sizeof(sr_ip_hdr_t);
       struct sr_udp_hdr* UDPPacket = (sr_udp_hdr_t*)(packet + aux);
       if (ntohs(UDPPacket->dst_port) == RIP_PORT && ntohs(UDPPacket->src_port) == RIP_PORT) {
@@ -238,8 +241,10 @@ void sr_handle_ip_packet(struct sr_instance *sr,
           len - aux, 
           interface
         );
+      } else {
+        sr_send_icmp_error_packet(3, 3, sr, src, (uint8_t*)ip_packet);
       }
-    } else {
+    } else if (ip_packet->ip_p == 6) {
       sr_send_icmp_error_packet(3, 3, sr, src, (uint8_t*)ip_packet);
     }
 
