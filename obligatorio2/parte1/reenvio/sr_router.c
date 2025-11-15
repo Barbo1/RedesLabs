@@ -184,7 +184,7 @@ void sr_handle_ip_packet(struct sr_instance *sr,
         memcpy(eth_packet->ether_shost, my_interface->addr, ETHER_ADDR_LEN);
 
         /* Cambio la parte de IP. */
-        ip_packet->ip_src = my_interface->ip;
+        ip_packet->ip_src = dest;
         ip_packet->ip_dst = src;
         ip_packet->ip_ttl = 32;
         ip_packet->ip_sum = ip_cksum(ip_packet, sizeof(sr_ip_hdr_t));

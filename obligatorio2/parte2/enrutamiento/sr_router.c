@@ -164,7 +164,7 @@ void sr_handle_ip_packet(struct sr_instance *sr,
   struct sr_if* my_interface;
   struct sr_rt* rt_entry;
 
-  if (htonl(dest) == RIP_IP && ip_packet->ip_ttl == 1) {
+  if (dest == htonl(RIP_IP) && ip_packet->ip_ttl == 1) {
     if (ip_packet->ip_p == ip_protocol_udp) {
       uint32_t aux = sizeof (sr_ethernet_hdr_t) + sizeof(sr_ip_hdr_t);
       struct sr_udp_hdr* UDPPacket = (sr_udp_hdr_t*)(packet + aux);
@@ -205,7 +205,7 @@ void sr_handle_ip_packet(struct sr_instance *sr,
         memcpy(eth_packet->ether_shost, my_interface->addr, ETHER_ADDR_LEN);
 
         /* Cambio la parte de IP. */
-        ip_packet->ip_src = my_interface->ip;
+        ip_packet->ip_src = dest;
         ip_packet->ip_dst = src;
         ip_packet->ip_ttl = 32;
         ip_packet->ip_sum = ip_cksum(ip_packet, sizeof(sr_ip_hdr_t));
